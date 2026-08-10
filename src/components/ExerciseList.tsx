@@ -66,25 +66,36 @@ async function updateLifetimeGoal(
 
   setSavingId(null);
 }
-  async function deleteExercise(id: string) {
-    if (!confirm("Delete this exercise?")) {
-      return;
-    }
-
-    setDeletingId(id);
-
-    const { error } = await supabase
-      .from("exercises")
-      .delete()
-      .eq("id", id);
-
-    if (!error) {
-      await onExercisesChanged();
-    }
-
-    setDeletingId(null);
+async function deleteExercise(id: string) {
+  if (!confirm("Delete this exercise?")) {
+    return;
   }
 
+  setDeletingId(id);
+
+  await supabase
+    .from("practice_routine_items")
+    .delete()
+    .eq("exercise_id", id);
+
+  await supabase
+    .from("drum_sessions")
+    .delete()
+    .eq("exercise_id", id);
+
+  const { error } = await supabase
+    .from("exercises")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    alert(`Could not delete exercise: ${error.message}`);
+  } else {
+    await onExercisesChanged();
+  }
+
+  setDeletingId(null);
+}
   function logSession(id: string, name: string) {
     setSelectedExerciseId(id);
     setSelectedExerciseName(name);
