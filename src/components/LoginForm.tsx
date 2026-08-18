@@ -7,7 +7,7 @@ export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-
+const [message, setMessage] = useState("");
   async function handleSignIn() {
     setError("");
 
@@ -20,7 +20,28 @@ export default function LoginForm() {
       setError(error.message);
     }
   }
+async function handleForgotPassword() {
+  setError("");
+  setMessage("");
 
+  if (!email) {
+    setError("Enter your email address first.");
+    return;
+  }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    email,
+    {
+      redirectTo: `${window.location.origin}/`,
+    }
+  );
+
+  if (error) {
+    setError(error.message);
+  } else {
+    setMessage("Password reset email sent. Check your inbox.");
+  }
+}
   return (
     <main className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="w-full max-w-md rounded-xl bg-white p-8 shadow">
@@ -53,13 +74,24 @@ export default function LoginForm() {
             {error}
           </p>
         )}
+{message && (
+  <p className="mb-4 text-green-600">
+    {message}
+  </p>
+)}
+<button
+  onClick={handleSignIn}
+  className="w-full rounded bg-black text-white p-3"
+>
+  Sign In
+</button>
 
-        <button
-          onClick={handleSignIn}
-          className="w-full rounded bg-black text-white p-3"
-        >
-          Sign In
-        </button>
+<button
+  onClick={handleForgotPassword}
+  className="mt-3 w-full rounded border p-3"
+>
+  Forgot password?
+</button>
       </div>
     </main>
   );
