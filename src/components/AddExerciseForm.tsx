@@ -14,10 +14,10 @@ export default function AddExerciseForm({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [lifetimeGoalMinutes, setLifetimeGoalMinutes] = useState(1000);
-  const [targetBpm, setTargetBpm] = useState(60);
+  const [targetBpm, setTargetBpm] = useState<number | "">(60);
 
   async function addExercise() {
-    if (!exerciseName.trim()) return;
+   if (!exerciseName.trim() || targetBpm === "") return;
 
     setSaving(true);
     setMessage("");
@@ -74,11 +74,12 @@ return (
         </label>
 
         <input
-          type="number"
+          type="text"
+inputMode="numeric"
           min="1"
           value={targetBpm}
           onChange={(e) =>
-            setTargetBpm(Number(e.target.value))
+          setTargetBpm(e.target.value === "" ? "" : Number(e.target.value))
           }
           className="w-32 rounded border p-3"
         />

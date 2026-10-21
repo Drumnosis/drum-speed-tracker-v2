@@ -59,7 +59,7 @@ export default function RoutineExerciseCard({
           <input
             type="number"
             min={1}
-            value={exercise.bpm}
+            value={exercise.bpm === 0 ? "" : exercise.bpm}
             onChange={(e) =>
               onUpdate(
                 exercise.id,
@@ -79,7 +79,7 @@ export default function RoutineExerciseCard({
           <input
             type="number"
             min={1}
-            value={exercise.duration}
+            value={exercise.duration === 0 ? "" : exercise.duration}
             onChange={(e) =>
               onUpdate(
                 exercise.id,
