@@ -29,6 +29,7 @@ export default function PracticePlayer({
   const [countInBeat, setCountInBeat] = useState(0);
 const [isResting, setIsResting] = useState(false);
 const [restSeconds, setRestSeconds] = useState(15);
+
 useEffect(() => {
   if (!isResting) {
     return;
@@ -337,7 +338,7 @@ function changeCurrentBpm(newBpm: number) {
   }
 
   return (
-    <section className="rounded-xl bg-white p-8 shadow-md">
+   <section className="rounded-xl bg-white p-4 shadow-md dark:bg-gray-900 dark:text-gray-100 sm:p-8">
       <h2 className="text-2xl font-semibold">
         Practice Routine
       </h2>

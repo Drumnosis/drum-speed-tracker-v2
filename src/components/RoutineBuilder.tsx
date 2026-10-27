@@ -242,7 +242,7 @@ export default function RoutineBuilder({
   }
 
   return (
-    <div className="rounded-xl bg-white p-8 shadow-md">
+    <div className="rounded-xl bg-white p-4 shadow-md dark:bg-gray-900 dark:text-gray-100 sm:p-8">
       <RoutineHeader />
 
       {loading ? (

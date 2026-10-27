@@ -64,11 +64,11 @@ const totalPracticeMinutes = sessions.reduce(
   0
 );
   return (
-    <main className="min-h-screen bg-gray-100">
-      <div className="mx-auto max-w-5xl p-8">
+    <main className="min-h-screen bg-gray-100 dark:bg-gray-950">
+      <div className="mx-auto max-w-5xl p-4 sm:p-8">
         <header className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900">
+            <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100">
               Drum Speed Tracker
             </h1>
 
@@ -91,7 +91,7 @@ const totalPracticeMinutes = sessions.reduce(
         />
 
         {currentPage === "home" && (
-          <section className="rounded-xl bg-white p-10 text-center shadow-md">
+          <section className="rounded-xl bg-white p-6 text-center shadow-md dark:bg-gray-900 dark:text-gray-100 sm:p-10">
             <h2 className="text-3xl font-semibold">
               Ready to practise?
             </h2>
@@ -100,7 +100,7 @@ const totalPracticeMinutes = sessions.reduce(
     How to use Drum Speed Tracker
   </h3>
 
-  <ol className="list-decimal space-y-3 pl-6 text-gray-700">
+  <ol className="list-decimal space-y-3 pl-6 text-gray-700 dark:text-gray-300">
     <li>
       Go to <strong>Exercises</strong>, enter the exercise name,
       target BPM and total practice-time target, then click
@@ -145,7 +145,7 @@ const totalPracticeMinutes = sessions.reduce(
         )}
 
         {currentPage === "exercises" && (
-          <section className="rounded-xl bg-white p-8 shadow-md">
+          <section className="rounded-xl bg-white p-4 shadow-md dark:bg-gray-900 dark:text-gray-100 sm:p-8">
             <h2 className="mb-6 text-2xl font-semibold">
               Exercises
             </h2>
@@ -188,7 +188,7 @@ const totalPracticeMinutes = sessions.reduce(
 )}
 
 {currentPage === "statistics" && (
-  <section className="rounded-xl bg-white p-8 shadow-md">
+ <section className="rounded-xl bg-white p-4 shadow-md dark:bg-gray-900 dark:text-gray-100 sm:p-8">
     <h2 className="text-2xl font-semibold">
       Statistics
     </h2>
