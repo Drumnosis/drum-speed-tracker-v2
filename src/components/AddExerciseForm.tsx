@@ -53,7 +53,7 @@ export default function AddExerciseForm({
 
 return (
   <div>
-    <div className="flex items-end gap-4">
+   <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
       <div className="flex-1">
         <label className="mb-1 block text-sm text-gray-600">
           Exercise name
@@ -81,7 +81,7 @@ inputMode="numeric"
           onChange={(e) =>
           setTargetBpm(e.target.value === "" ? "" : Number(e.target.value))
           }
-          className="w-32 rounded border p-3"
+          className="w-full rounded border p-3 sm:w-32"
         />
       </div>
 
@@ -95,7 +95,7 @@ inputMode="numeric"
           onChange={(e) =>
             setLifetimeGoalMinutes(Number(e.target.value))
           }
-          className="w-40 rounded border p-3"
+          className="w-full rounded border p-3 sm:w-40"
         >
           <option value={100}>100 minutes</option>
           <option value={500}>500 minutes</option>
@@ -106,7 +106,7 @@ inputMode="numeric"
       <button
         onClick={addExercise}
         disabled={saving}
-        className="rounded bg-blue-600 px-6 py-3 text-white disabled:opacity-50"
+       className="w-full rounded bg-blue-600 px-6 py-3 text-white disabled:opacity-50 sm:w-auto"
       >
         {saving ? "Saving..." : "Add Exercise"}
       </button>
