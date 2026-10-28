@@ -127,7 +127,7 @@ async function deleteExercise(id: string) {
           return (
             <div
               key={exercise.id}
-              className="rounded-lg border bg-white p-5 shadow-sm"
+              className="rounded-lg border bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">
@@ -153,7 +153,7 @@ async function deleteExercise(id: string) {
 
               {!readOnly && (
                 <div className="mt-4 flex items-center gap-3">
-                  <label className="text-sm text-gray-600">
+                  <label className="text-sm text-gray-600 dark:text-gray-300">
                     Target BPM
                   </label>
 

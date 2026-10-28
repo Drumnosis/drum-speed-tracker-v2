@@ -90,7 +90,7 @@ export default function ExerciseStats({
       </div>
 
       <div className="col-span-2">
-        <div className="h-3 overflow-hidden rounded-full bg-gray-200">
+       <div className="h-3 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
           <div
             className="h-full bg-black"
             style={{
