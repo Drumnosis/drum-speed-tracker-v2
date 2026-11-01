@@ -15,9 +15,14 @@ export default function AddExerciseForm({
   const [message, setMessage] = useState("");
   const [lifetimeGoalMinutes, setLifetimeGoalMinutes] = useState(1000);
   const [targetBpm, setTargetBpm] = useState<number | "">(60);
+  const [startingBpm, setStartingBpm] = useState<number | "">(60);
 
   async function addExercise() {
-   if (!exerciseName.trim() || targetBpm === "") return;
+   if (!exerciseName.trim() || !Number.isFinite(targetBpm) || Number(targetBpm) <= 0 ||
+       !Number.isFinite(startingBpm) || Number(startingBpm) < 30 || Number(startingBpm) > 300) {
+     setMessage("Enter an exercise name, a positive target BPM and a starting BPM from 30 to 300.");
+     return;
+   }
 
     setSaving(true);
     setMessage("");
@@ -36,6 +41,7 @@ export default function AddExerciseForm({
       user_id: user.id,
       name: exerciseName,
       target_bpm: targetBpm,
+      starting_bpm: startingBpm,
       target_minutes: 0,
       lifetime_goal_minutes: lifetimeGoalMinutes,
     });
@@ -66,6 +72,13 @@ return (
           onChange={(e) => setExerciseName(e.target.value)}
           className="w-full rounded border p-3"
         />
+      </div>
+
+      <div>
+        <label htmlFor="starting-bpm" className="mb-1 block text-sm text-gray-600">Starting BPM</label>
+        <input id="starting-bpm" type="number" min="30" max="300" value={startingBpm}
+          onChange={e => setStartingBpm(e.target.value === "" ? "" : Number(e.target.value))}
+          className="w-full rounded border p-3 sm:w-32" />
       </div>
 
       <div>

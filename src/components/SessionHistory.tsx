@@ -33,7 +33,7 @@ export default function SessionHistory({
         {latestSessions.map((session) => (
           <div
             key={session.id}
-            className="flex justify-between rounded bg-gray-100 px-3 py-2 text-sm"
+            className="flex justify-between rounded bg-gray-100 px-3 py-2 text-sm dark:bg-gray-700"
           >
             <span>
               {new Date(session.created_at).toLocaleDateString(

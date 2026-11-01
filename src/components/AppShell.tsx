@@ -7,6 +7,7 @@ import ExerciseList from "@/components/ExerciseList";
 import Navigation from "@/components/Navigation";
 import RoutineBuilder from "@/components/RoutineBuilder";
 import PracticePlayer from "@/components/PracticePlayer";
+import { parsePractice } from "@/utils/practiceState";
 import type {
   Exercise,
   DrumSession,
@@ -22,6 +23,8 @@ export default function AppShell() {
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessions, setSessions] = useState<DrumSession[]>([]);
+  const [hasRecovery, setHasRecovery] = useState(false);
+  const [dataError, setDataError] = useState("");
 
   useEffect(() => {
     loadData();
@@ -33,15 +36,20 @@ export default function AppShell() {
     } = await supabase.auth.getUser();
 
     if (!user) return;
+    try {
+      const saved = parsePractice(localStorage.getItem(`drum-practice:v1:${user.id}`));
+      setHasRecovery(!!saved && (saved.phase !== "complete" || saved.pending.length > 0));
+    } catch { /* Practice will explain if recovery storage is unavailable. */ }
 
     const { data: exerciseData, error: exerciseError } = await supabase
       .from("exercises")
-      .select("id, name, target_bpm, lifetime_goal_minutes")
+      .select("id, name, target_bpm, starting_bpm, last_practice_bpm, lifetime_goal_minutes")
       .eq("user_id", user.id)
       .order("created_at", { ascending: true });
 
     if (exerciseError) {
       console.error(exerciseError);
+      setDataError(`Could not load exercises: ${exerciseError.message}. Apply the supplied Supabase migration before testing this update.`);
       return;
     }
 
@@ -53,11 +61,13 @@ export default function AppShell() {
 
     if (sessionError) {
       console.error(sessionError);
+      setDataError(`Could not load sessions: ${sessionError.message}`);
       return;
     }
 
     setExercises(exerciseData ?? []);
     setSessions(sessionData ?? []);
+    setDataError("");
   }
 const totalPracticeMinutes = sessions.reduce(
   (total, session) => total + session.minutes,
@@ -89,6 +99,14 @@ const totalPracticeMinutes = sessions.reduce(
           currentPage={currentPage}
           onNavigate={setCurrentPage}
         />
+        {dataError && <p role="alert" className="mb-4 text-red-600">{dataError}</p>}
+        {hasRecovery && !(currentPage === "practice" && practiceMode === "player") && (
+          <div className="mb-4 rounded-lg border border-blue-500 p-4 dark:text-gray-100">
+            <p>You have saved practice to continue, or completed exercises waiting to save.</p>
+            <button className="mt-2 rounded bg-blue-600 px-4 py-3 text-white"
+              onClick={() => { setCurrentPage("practice"); setPracticeMode("player"); }}>Continue saved practice</button>
+          </div>
+        )}
 
         {currentPage === "home" && (
           <section className="rounded-xl bg-white p-6 text-center shadow-md dark:bg-gray-900 dark:text-gray-100 sm:p-10">
@@ -103,7 +121,7 @@ const totalPracticeMinutes = sessions.reduce(
   <ol className="list-decimal space-y-3 pl-6 text-gray-700 dark:text-gray-300">
     <li>
       Go to <strong>Exercises</strong>, enter the exercise name,
-      target BPM and total practice-time target, then click
+      starting BPM, target BPM and total practice-time target, then click
       <strong> Add Exercise</strong>.
     </li>
 
@@ -179,7 +197,7 @@ const totalPracticeMinutes = sessions.reduce(
     ) : (
       <PracticePlayer
         onExit={() =>
-          setPracticeMode("builder")
+          { setPracticeMode("builder"); void loadData(); }
         }
         onSessionSaved={loadData}
       />

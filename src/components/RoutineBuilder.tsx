@@ -21,13 +21,10 @@ export default function RoutineBuilder({
   const [routine, setRoutine] = useState<RoutineExercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [editedBpms, setEditedBpms] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    if (exercises.length > 0) {
-      loadRoutine();
-    }
-  }, [exercises]);
-
+  let cancelled = false;
   async function loadRoutine() {
     setLoading(true);
 
@@ -73,14 +70,16 @@ export default function RoutineBuilder({
 
     loadedRoutine.push({
   ...exercise,
-  bpm: item.bpm,
+  bpm: exercise.last_practice_bpm ?? exercise.starting_bpm ?? item.bpm,
   duration: item.duration,
 });
     });
 
-    setRoutine(loadedRoutine);
-    setLoading(false);
+    if (!cancelled) { setRoutine(loadedRoutine); setLoading(false); }
   }
+  void loadRoutine();
+  return () => { cancelled = true; };
+  }, [exercises]);
 
   const availableExercises = useMemo(
     () =>
@@ -102,7 +101,7 @@ export default function RoutineBuilder({
       ...current,
       {
         ...exercise,
-        bpm: exercise.target_bpm,
+        bpm: exercise.last_practice_bpm ?? exercise.starting_bpm ?? 60,
         duration: 5,
       },
     ]);
@@ -113,6 +112,7 @@ export default function RoutineBuilder({
     field: "bpm" | "duration",
     value: number
   ) {
+    if (field === "bpm") setEditedBpms(current => ({ ...current, [id]: value }));
     setRoutine((current) =>
       current.map((exercise) =>
         exercise.id === id
@@ -177,6 +177,11 @@ export default function RoutineBuilder({
   }
 
   async function saveRoutine() {
+    if (routine.some(e => !Number.isFinite(e.bpm) || e.bpm < 30 || e.bpm > 300 ||
+      !Number.isFinite(e.duration) || e.duration <= 0)) {
+      alert("BPM must be 30–300 and duration must be greater than zero.");
+      return;
+    }
     setSaving(true);
 
     const {
@@ -217,10 +222,11 @@ export default function RoutineBuilder({
 
       routineId = newRoutine.id;
     }
-        await supabase
+    const { error: deleteError } = await supabase
       .from("practice_routine_items")
       .delete()
       .eq("routine_id", routineId);
+    if (deleteError) { alert(deleteError.message); setSaving(false); return; }
 
    const items = routine.map((exercise, index) => ({
   routine_id: routineId,
@@ -231,10 +237,20 @@ export default function RoutineBuilder({
 }));
 
     if (items.length > 0) {
-      await supabase
+      const { error } = await supabase
         .from("practice_routine_items")
         .insert(items);
+      if (error) { alert(error.message); setSaving(false); return; }
     }
+
+    // An explicit tempo edit in the builder is also a practice-tempo choice.
+    for (const exercise of routine) {
+      if (!(exercise.id in editedBpms)) continue;
+      const { error } = await supabase.from("exercises").update({ last_practice_bpm: exercise.bpm })
+        .eq("id", exercise.id).eq("user_id", user.id);
+      if (error) { alert(error.message); setSaving(false); return; }
+    }
+    setEditedBpms({});
 
     setSaving(false);
 

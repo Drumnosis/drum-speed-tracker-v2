@@ -58,7 +58,8 @@ export default function RoutineExerciseCard({
 
           <input
             type="number"
-            min={1}
+            min={30}
+            max={300}
             value={exercise.bpm === 0 ? "" : exercise.bpm}
             onChange={(e) =>
               onUpdate(

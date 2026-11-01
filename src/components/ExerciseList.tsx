@@ -22,50 +22,11 @@ export default function ExerciseList({
   onExercisesChanged,
   readOnly = false,
 }: ExerciseListProps) {
-  const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [selectedExerciseName, setSelectedExerciseName] = useState("");
 
-  async function updateTargetBpm(
-    id: string,
-    targetBpm: number
-  ) {
-    setSavingId(id);
-
-    const { error } = await supabase
-      .from("exercises")
-      .update({
-        target_bpm: targetBpm,
-      })
-      .eq("id", id);
-
-    if (!error) {
-      await onExercisesChanged();
-    }
-
-    setSavingId(null);
-  }
-async function updateLifetimeGoal(
-  id: string,
-  lifetimeGoalMinutes: number
-) {
-  setSavingId(id);
-
-  const { error } = await supabase
-    .from("exercises")
-    .update({
-      lifetime_goal_minutes: lifetimeGoalMinutes,
-    })
-    .eq("id", id);
-
-  if (!error) {
-    await onExercisesChanged();
-  }
-
-  setSavingId(null);
-}
 async function deleteExercise(id: string) {
   if (!confirm("Delete this exercise?")) {
     return;
@@ -133,6 +94,8 @@ async function deleteExercise(id: string) {
                 <h3 className="text-lg font-semibold">
                   {exercise.name}
                 </h3>
+                <button onClick={() => logSession(exercise.id, exercise.name)}
+                  className="rounded bg-blue-600 px-3 py-2 text-white">Log practice</button>
 
                 {!readOnly && (
                   <div className="flex gap-2">
@@ -165,6 +128,8 @@ async function deleteExercise(id: string) {
 </span>
 </div>
               )}
+              {!readOnly && <p className="mt-3 text-sm">Starting BPM: {exercise.starting_bpm ?? 60}
+                {exercise.last_practice_bpm != null && ` · Last practice BPM: ${exercise.last_practice_bpm}`}</p>}
 <div className="mt-4 flex items-center gap-3">
   <label className="text-sm text-gray-600">
     Total Time Target
@@ -196,6 +161,7 @@ async function deleteExercise(id: string) {
       sessions={exerciseSessions}
       targetBpm={exercise.target_bpm}
     />
+    <SessionHistory sessions={exerciseSessions} />
 
 
   </>
@@ -206,6 +172,7 @@ async function deleteExercise(id: string) {
       </div>
 
       <LogSessionModal
+        key={`${selectedExerciseId}:${modalOpen}`}
         open={modalOpen}
         exerciseId={selectedExerciseId}
         exerciseName={selectedExerciseName}

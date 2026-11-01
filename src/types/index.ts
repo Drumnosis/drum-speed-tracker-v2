@@ -2,6 +2,8 @@ export type Exercise = {
   id: string;
   name: string;
   target_bpm: number;
+  starting_bpm?: number;
+  last_practice_bpm?: number | null;
   lifetime_goal_minutes: number;
 };
 
