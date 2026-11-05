@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/services/supabase";
 import { saveCompletedPractice, savePracticeBpm } from "@/services/practiceSessions";
 import { createClientId } from "@/utils/clientId";
+import type { Exercise } from "@/types";
+import GrooveNotation from "./GrooveNotation";
 import { advancePractice, changePracticeBpm, createPractice, nextExercise, parsePractice, togglePractice,
   type PracticeState, type PracticeExercise } from "@/utils/practiceState";
 
-type Props = { routineId: string | null; onExit: () => void; onSessionSaved: () => Promise<void> };
+type Props = { routineId: string | null; exercises: Exercise[]; onExit: () => void; onSessionSaved: () => Promise<void> };
 
-export default function PracticePlayer({ routineId, onExit, onSessionSaved }: Props) {
+export default function PracticePlayer({ routineId, exercises, onExit, onSessionSaved }: Props) {
   const [state, setState] = useState<PracticeState | null>(null);
   const [interrupted, setInterrupted] = useState(false);
   const [message, setMessage] = useState("");
@@ -275,6 +277,7 @@ export default function PracticePlayer({ routineId, onExit, onSessionSaved }: Pr
   }
 
   const exercise = state?.routine[state.index];
+  const grooveUrl = exercises.find(item => item.id === exercise?.id)?.groove_scribe_url;
   const resting = phase === "rest" || phase === "restPaused";
   const seconds = Math.ceil((resting ? state?.restMs ?? 0 : state?.remainingMs ?? 0) / 1000);
   const button = "rounded-lg px-5 py-3 font-semibold disabled:opacity-40";
@@ -318,6 +321,7 @@ export default function PracticePlayer({ routineId, onExit, onSessionSaved }: Pr
             <button onClick={exit} className={`${button} bg-gray-600 text-white`}>Exit</button>
           </div>
         </div>
+        <GrooveNotation key={exercise.sessionId} url={grooveUrl} />
       </> : <button onClick={exit} className={`${button} mt-6 bg-gray-600 text-white`}>Exit</button>}
     </section>
   );

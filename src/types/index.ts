@@ -4,6 +4,7 @@ export type Exercise = {
   target_bpm: number;
   starting_bpm?: number;
   last_practice_bpm?: number | null;
+  groove_scribe_url?: string | null;
   lifetime_goal_minutes: number;
 };
 

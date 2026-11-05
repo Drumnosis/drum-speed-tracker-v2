@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { supabase } from "@/services/supabase";
+import { getGrooveScribeLink } from "@/utils/grooveScribe";
+import GrooveScribeField from "./GrooveScribeField";
 
 type AddExerciseFormProps = {
   onExerciseAdded: () => Promise<void>;
@@ -16,6 +18,7 @@ export default function AddExerciseForm({
   const [lifetimeGoalMinutes, setLifetimeGoalMinutes] = useState(1000);
   const [targetBpm, setTargetBpm] = useState<number | "">(60);
   const [startingBpm, setStartingBpm] = useState<number | "">(60);
+  const [grooveUrl, setGrooveUrl] = useState("");
 
   async function addExercise() {
    if (!exerciseName.trim() || !Number.isFinite(targetBpm) || Number(targetBpm) <= 0 ||
@@ -23,6 +26,11 @@ export default function AddExerciseForm({
      setMessage("Enter an exercise name, a positive target BPM and a starting BPM from 30 to 300.");
      return;
    }
+    const link = getGrooveScribeLink(grooveUrl);
+    if (grooveUrl.trim() && !link) {
+      setMessage("Paste a valid Groove Scribe share URL, or leave the field blank.");
+      return;
+    }
 
     setSaving(true);
     setMessage("");
@@ -44,12 +52,14 @@ export default function AddExerciseForm({
       starting_bpm: startingBpm,
       target_minutes: 0,
       lifetime_goal_minutes: lifetimeGoalMinutes,
+      groove_scribe_url: link?.original ?? null,
     });
 
     if (error) {
       setMessage(error.message);
     } else {
       setExerciseName("");
+      setGrooveUrl("");
       setMessage("Exercise saved.");
       await onExerciseAdded();
     }
@@ -116,6 +126,11 @@ inputMode="numeric"
         </select>
       </div>
 
+    </div>
+    <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end">
+      <div className="min-w-0 flex-1">
+        <GrooveScribeField value={grooveUrl} onChange={setGrooveUrl} />
+      </div>
       <button
         onClick={addExercise}
         disabled={saving}
@@ -126,7 +141,7 @@ inputMode="numeric"
     </div>
 
     {message && (
-      <p className="mt-4 text-sm text-gray-600">
+      <p role="status" className="mt-4 text-sm text-gray-600 dark:text-gray-300">
         {message}
       </p>
     )}

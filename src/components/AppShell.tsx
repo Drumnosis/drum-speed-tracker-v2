@@ -45,7 +45,7 @@ export default function AppShell() {
 
     const { data: exerciseData, error: exerciseError } = await supabase
       .from("exercises")
-      .select("id, name, target_bpm, starting_bpm, last_practice_bpm, lifetime_goal_minutes")
+      .select("id, name, target_bpm, starting_bpm, last_practice_bpm, lifetime_goal_minutes, groove_scribe_url")
       .eq("user_id", user.id)
       .order("created_at", { ascending: true });
 
@@ -204,6 +204,7 @@ const totalPracticeMinutes = sessions.reduce(
     ) : (
       <PracticePlayer
         routineId={playingRoutineId}
+        exercises={exercises}
         onExit={() =>
           { setPracticeMode("builder"); void loadData(); }
         }

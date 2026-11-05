@@ -6,6 +6,8 @@ import LogSessionModal from "@/components/LogSessionModal";
 import ExerciseStats from "@/components/ExerciseStats";
 import BpmProgressChart from "@/components/BpmProgressChart";
 import SessionHistory from "@/components/SessionHistory";
+import EditGrooveScribeLink from "@/components/EditGrooveScribeLink";
+import GrooveNotation from "@/components/GrooveNotation";
 import { calculateExerciseStats } from "@/utils/exerciseStats";
 import type { Exercise, DrumSession } from "@/types";
 
@@ -143,6 +145,17 @@ async function deleteExercise(id: string) {
   </span>
 </div>
            
+
+           {!readOnly && (
+             <>
+               <GrooveNotation key={exercise.groove_scribe_url} url={exercise.groove_scribe_url} />
+               <EditGrooveScribeLink
+                 exerciseId={exercise.id}
+                 url={exercise.groove_scribe_url}
+                 onSaved={onExercisesChanged}
+               />
+             </>
+           )}
 
            {readOnly && (
   <>
