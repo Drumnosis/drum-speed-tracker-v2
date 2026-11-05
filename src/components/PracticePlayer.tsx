@@ -7,9 +7,9 @@ import { createClientId } from "@/utils/clientId";
 import { advancePractice, changePracticeBpm, createPractice, nextExercise, parsePractice, togglePractice,
   type PracticeState, type PracticeExercise } from "@/utils/practiceState";
 
-type Props = { onExit: () => void; onSessionSaved: () => Promise<void> };
+type Props = { routineId: string | null; onExit: () => void; onSessionSaved: () => Promise<void> };
 
-export default function PracticePlayer({ onExit, onSessionSaved }: Props) {
+export default function PracticePlayer({ routineId, onExit, onSessionSaved }: Props) {
   const [state, setState] = useState<PracticeState | null>(null);
   const [interrupted, setInterrupted] = useState(false);
   const [message, setMessage] = useState("");
@@ -97,8 +97,9 @@ export default function PracticePlayer({ onExit, onSessionSaved }: Props) {
           void flush();
           return;
         }
+        if (!routineId) { setMessage("No saved practice to continue. Go back and choose a routine."); return; }
         const { data: routine, error: routineError } = await supabase.from("practice_routines")
-          .select("id").eq("user_id", user.id).maybeSingle();
+          .select("id").eq("id", routineId).eq("user_id", user.id).maybeSingle();
         if (routineError) throw routineError;
         if (!routine) { setMessage("No saved routine. Exit and build a routine first."); return; }
         const { data: items, error: itemsError } = await supabase.from("practice_routine_items")
@@ -126,7 +127,7 @@ export default function PracticePlayer({ onExit, onSessionSaved }: Props) {
     }
     void load();
     return () => { cancelled = true; active.current = false; };
-  }, [commit, flush]);
+  }, [commit, flush, routineId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

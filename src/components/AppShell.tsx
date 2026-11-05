@@ -20,6 +20,8 @@ export default function AppShell() {
   const [practiceMode, setPracticeMode] = useState<
     "builder" | "player"
   >("builder");
+  const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
+  const [playingRoutineId, setPlayingRoutineId] = useState<string | null>(null);
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessions, setSessions] = useState<DrumSession[]>([]);
@@ -97,14 +99,23 @@ const totalPracticeMinutes = sessions.reduce(
 
         <Navigation
           currentPage={currentPage}
-          onNavigate={setCurrentPage}
+          onNavigate={(page) => {
+            if (currentPage === "practice" && practiceMode === "player" && page !== "practice") {
+              void loadData();
+            }
+            setCurrentPage(page);
+          }}
         />
         {dataError && <p role="alert" className="mb-4 text-red-600">{dataError}</p>}
         {hasRecovery && !(currentPage === "practice" && practiceMode === "player") && (
           <div className="mb-4 rounded-lg border border-blue-500 p-4 dark:text-gray-100">
             <p>You have saved practice to continue, or completed exercises waiting to save.</p>
             <button className="mt-2 rounded bg-blue-600 px-4 py-3 text-white"
-              onClick={() => { setCurrentPage("practice"); setPracticeMode("player"); }}>Continue saved practice</button>
+              onClick={() => {
+                setPlayingRoutineId(null);
+                setCurrentPage("practice");
+                setPracticeMode("player");
+              }}>Continue saved practice</button>
           </div>
         )}
 
@@ -126,8 +137,8 @@ const totalPracticeMinutes = sessions.reduce(
     </li>
 
     <li>
-      Go to <strong>Practice</strong> and choose the exercises you
-      want to include in your routine.
+      Go to <strong>Practice</strong>, choose <strong>New Routine</strong>,
+      then name it and add exercises.
     </li>
 
     <li>
@@ -153,11 +164,11 @@ const totalPracticeMinutes = sessions.reduce(
             <button
               onClick={() => {
                 setCurrentPage("practice");
-                setPracticeMode("player");
+                setPracticeMode("builder");
               }}
               className="mt-8 w-full rounded-lg bg-blue-600 py-4 text-lg font-semibold text-white"
             >
-              Start Routine
+              Choose a Routine
             </button>
           </section>
         )}
@@ -180,22 +191,19 @@ const totalPracticeMinutes = sessions.reduce(
 {currentPage === "practice" && (
   <>
     {practiceMode === "builder" ? (
-      <>
-        <div className="mb-4 flex justify-end">
-          <button
-            onClick={() =>
-              setPracticeMode("player")
-            }
-            className="rounded bg-green-600 px-4 py-2 text-white"
-          >
-            Start Routine
-          </button>
-        </div>
-
-        <RoutineBuilder exercises={exercises} />
-      </>
+      <RoutineBuilder
+        exercises={exercises}
+        preferredRoutineId={selectedRoutineId}
+        hasRecovery={hasRecovery}
+        onStart={(id) => {
+          setSelectedRoutineId(id);
+          setPlayingRoutineId(id);
+          setPracticeMode("player");
+        }}
+      />
     ) : (
       <PracticePlayer
+        routineId={playingRoutineId}
         onExit={() =>
           { setPracticeMode("builder"); void loadData(); }
         }

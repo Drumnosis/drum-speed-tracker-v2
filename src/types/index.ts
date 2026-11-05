@@ -40,5 +40,7 @@ export type PracticeRoutineItem = {
   routine_id: string;
   exercise_id: string;
   position: number;
+  bpm: number;
+  duration: number;
   created_at: string;
 };
