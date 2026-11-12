@@ -24,7 +24,7 @@ Use Node 22.6+ (Node 24 was used here). Run `npm test`, `npm run lint`, `npx tsc
 1. Add an exercise with Starting BPM 60 and Target BPM 120. Include it and another exercise in a saved short routine. Start it: it should use 60 and count four beats.
 2. Pause partway through; change BPM to 62. Verify the exercise time stays fixed. Resume, finish, and check Statistics immediately, before the whole routine ends. There should be one entry at 62.
 3. During rest, change BPM with the buttons and slider: the countdown must continue. Pause Rest; note the displayed seconds; change BPM several times and wait. The seconds must stay fixed. Resume Rest: it continues from the saved time, with a pulse each second.
-4. Try all four subdivisions. Main beats and the first-beat accent should remain clear; the count-in still has four beats.
+4. Try all seven subdivisions: Quarter notes, Eighth notes, Eighth-note triplets, Sixteenth notes, Quintuplets, Septuplets and 32nd notes. At 60 BPM, each main beat is one second apart, containing respectively 1, 2, 3, 4, 5, 7 or 8 evenly spaced clicks. Main beats and the first-beat accent should remain clear; the count-in still has four quarter-note beats. Change subdivision while running, paused and resting: BPM, exercise/rest time and routine position must not reset. Refresh with each new subdivision selected and use Continue practice; the selection and saved state should restore. Check the selector at phone width in light/dark mode. No database migration is needed for these subdivisions.
 5. Refresh/close/reopen or background during running practice, paused practice, running rest and paused rest. Open Continue saved practice, then Continue practice. Check the exercise, BPM and time; paused states must stay paused. Time away must not be added. Complete the routine and confirm no duplicate sessions.
 6. Switch offline just before an exercise ends. See the pending-save message; reconnect or reopen Practice and retry. Confirm exactly one entry after repeated retry/refresh. Also test leaving during rest after a completion.
 7. Use Skip before starting, during count-in and while running. The next exercise should wait for Start, and the skipped exercise must have no new session. Skip the last exercise; routine ends.
@@ -33,3 +33,13 @@ Use Node 22.6+ (Node 24 was used here). Run `npm test`, `npm run lint`, `npx tsc
 10. On the iPhone Home Screen app over HTTPS, start practice and leave the screen untouched through exercise/rest/pause. Check it stays awake, then Exit/finish and check normal screen locking resumes. Also check layout and audio in light/dark modes. A denied/unsupported wake lock must not stop practice.
 
 No deployment, push, subscription, notation, quiz or automatic BPM increment is included.
+
+## Quick Practice local checks
+
+Quick Practice uses whole minutes (1–180), matching the existing integer session-duration storage. No database migration is needed for this fix. Use **1 minute** for manual testing. Automated tests advance a mocked clock by 60,000 ms; do not use decimal-minute production sessions to shorten a test.
+
+1. Open Practice → Quick Practice — Single Exercise. Select an exercise, choose BPM, set duration to **1 minute**, choose subdivision, then Start. Confirm four count-in beats followed by a full minute of practice.
+2. Try entering a decimal or zero duration: Quick Practice must keep a valid whole-minute duration. Finish and check exactly one 1-minute session in Statistics/history, remembered BPM, and no Continue saved practice banner.
+3. Navigate away or reload during the minute, then Continue saved practice. Check Quick Practice identity, BPM, subdivision and remaining time. Time away must not count.
+4. If an earlier decimal-minute Quick Practice is pending, open Continue saved practice and choose **Clear invalid Quick Practice**, then confirm. This discards only invalid time instead of rounding it up or inserting a session. Practice BPM is kept; valid pending saves remain queued. If offline, reconnect and Retry save to finish the BPM update and clear recovery.
+5. Reload after clearing: no invalid session or extra practice time should appear. Repeat a normal 1-minute Quick Practice and check one new session. Test a named routine as before.

@@ -11,7 +11,7 @@ type AuthGateProps = {
 };
 
 export default function AuthGate({ children }: AuthGateProps) {
-  const { user, loading } = useAuth();
+  const { user, loading, error, retry } = useAuth();
   const [recoveryMode, setRecoveryMode] = useState(false);
 
   useEffect(() => {
@@ -42,6 +42,12 @@ if (recoveryMode) {
     />
   );
 }
+  if (!user && error) {
+    return <main className="min-h-screen bg-gray-100 p-6 dark:bg-gray-950 dark:text-gray-100">
+      <p role="alert">{error}</p>
+      <button onClick={retry} className="mt-4 rounded bg-blue-600 px-4 py-3 text-white">Retry connection</button>
+    </main>;
+  }
   if (!user) {
     return <LoginForm />;
   }

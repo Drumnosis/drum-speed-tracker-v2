@@ -7,6 +7,8 @@ import ExerciseList from "@/components/ExerciseList";
 import Navigation from "@/components/Navigation";
 import RoutineBuilder from "@/components/RoutineBuilder";
 import PracticePlayer from "@/components/PracticePlayer";
+import { practiceIdentity } from "@/services/practiceIdentity";
+import { needsPracticeRecovery } from "@/utils/practiceRecovery";
 import { parsePractice } from "@/utils/practiceState";
 import type {
   Exercise,
@@ -20,11 +22,13 @@ export default function AppShell() {
   const [practiceMode, setPracticeMode] = useState<
     "builder" | "player"
   >("builder");
+  const [quickPractice, setQuickPractice] = useState(false);
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
   const [playingRoutineId, setPlayingRoutineId] = useState<string | null>(null);
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessions, setSessions] = useState<DrumSession[]>([]);
+  const [recoveryIsQuick, setRecoveryIsQuick] = useState(false);
   const [hasRecovery, setHasRecovery] = useState(false);
   const [dataError, setDataError] = useState("");
 
@@ -33,14 +37,12 @@ export default function AppShell() {
   }, []);
 
   async function loadData() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) return;
+    try {
+    const user = await practiceIdentity(supabase.auth);
     try {
       const saved = parsePractice(localStorage.getItem(`drum-practice:v1:${user.id}`));
-      setHasRecovery(!!saved && (saved.phase !== "complete" || saved.pending.length > 0));
+      setHasRecovery(needsPracticeRecovery(saved) || (!!saved && Object.keys(JSON.parse(localStorage.getItem(`drum-bpm-pending:${user.id}`) ?? "{}")).length > 0));
+      setRecoveryIsQuick(saved?.quickPractice === true);
     } catch { /* Practice will explain if recovery storage is unavailable. */ }
 
     const { data: exerciseData, error: exerciseError } = await supabase
@@ -70,6 +72,7 @@ export default function AppShell() {
     setExercises(exerciseData ?? []);
     setSessions(sessionData ?? []);
     setDataError("");
+    } catch { setDataError("Could not refresh practice data. Check your connection and retry. Your signed-in session and saved practice have been kept."); }
   }
 const totalPracticeMinutes = sessions.reduce(
   (total, session) => total + session.minutes,
@@ -106,13 +109,13 @@ const totalPracticeMinutes = sessions.reduce(
             setCurrentPage(page);
           }}
         />
-        {dataError && <p role="alert" className="mb-4 text-red-600">{dataError}</p>}
+        {dataError && <p role="alert" className="mb-4 text-red-600">{dataError} <button onClick={() => void loadData()} className="underline">Retry refresh</button></p>}
         {hasRecovery && !(currentPage === "practice" && practiceMode === "player") && (
           <div className="mb-4 rounded-lg border border-blue-500 p-4 dark:text-gray-100">
             <p>You have saved practice to continue, or completed exercises waiting to save.</p>
             <button className="mt-2 rounded bg-blue-600 px-4 py-3 text-white"
               onClick={() => {
-                setPlayingRoutineId(null);
+                setPlayingRoutineId(null); setQuickPractice(recoveryIsQuick);
                 setCurrentPage("practice");
                 setPracticeMode("player");
               }}>Continue saved practice</button>
@@ -191,18 +194,23 @@ const totalPracticeMinutes = sessions.reduce(
 {currentPage === "practice" && (
   <>
     {practiceMode === "builder" ? (
+      <>
+      <button onClick={() => { setQuickPractice(true); setPlayingRoutineId(null); setPracticeMode("player"); }} className="mb-4 w-full rounded-xl bg-blue-600 px-4 py-4 text-lg font-semibold text-white">Quick Practice — Single Exercise</button>
       <RoutineBuilder
         exercises={exercises}
         preferredRoutineId={selectedRoutineId}
         hasRecovery={hasRecovery}
         onStart={(id) => {
-          setSelectedRoutineId(id);
+          setQuickPractice(false); setSelectedRoutineId(id);
           setPlayingRoutineId(id);
           setPracticeMode("player");
         }}
       />
+      </>
     ) : (
       <PracticePlayer
+        onRecoveryChange={setHasRecovery}
+        quickPractice={quickPractice}
         routineId={playingRoutineId}
         exercises={exercises}
         onExit={() =>

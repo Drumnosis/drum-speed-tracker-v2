@@ -166,3 +166,10 @@ test('standalone remembered BPM update verifies the saved value without touching
   assert.equal(db.exercise.target_bpm, 80);
   assert.equal(db.sessions.size, 0);
 });
+test('fractional and otherwise invalid minutes are rejected before any session or BPM write', async () => {
+  for (const minutes of [0.1, 0.5, 1.5, 0, -1, NaN, Infinity]) {
+    let calls = 0;
+    await assert.rejects(saveCompletedPractice({from(){calls++;throw new Error('must not reach database');}}, 'user', {...session, minutes}), /positive whole number/);
+    assert.equal(calls, 0);
+  }
+});

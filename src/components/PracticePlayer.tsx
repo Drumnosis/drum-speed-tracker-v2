@@ -3,16 +3,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/services/supabase";
 import { saveCompletedPractice, savePracticeBpm } from "@/services/practiceSessions";
+import { practiceIdentity } from "@/services/practiceIdentity";
+import { needsPracticeRecovery, persistPractice } from "@/utils/practiceRecovery";
 import { createClientId } from "@/utils/clientId";
+import { metronomeClick, metronomeIntervalMs } from "@/utils/metronome";
 import type { Exercise } from "@/types";
 import GrooveNotation from "./GrooveNotation";
-import { advancePractice, changePracticeBpm, createPractice, nextExercise, parsePractice, togglePractice,
+import { SUBDIVISIONS, hasInvalidQuickDuration, clearInvalidQuickPractice, createQuickPractice, changePracticeDuration, advancePractice, changePracticeBpm, changePracticeSubdivision, createPractice, nextExercise, parsePractice, togglePractice,
   type PracticeState, type PracticeExercise } from "@/utils/practiceState";
 
-type Props = { routineId: string | null; exercises: Exercise[]; onExit: () => void; onSessionSaved: () => Promise<void> };
+type Props = { onRecoveryChange: (available: boolean) => void; quickPractice?: boolean; routineId: string | null; exercises: Exercise[]; onExit: () => void; onSessionSaved: () => Promise<void> };
 
-export default function PracticePlayer({ routineId, exercises, onExit, onSessionSaved }: Props) {
+export default function PracticePlayer({ quickPractice = false, routineId, exercises, onExit, onSessionSaved, onRecoveryChange }: Props) {
   const [state, setState] = useState<PracticeState | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadError, setLoadError] = useState("");
+  const [loaded, setLoaded] = useState(false);
   const [interrupted, setInterrupted] = useState(false);
   const [message, setMessage] = useState("");
   const [storageError, setStorageError] = useState("");
@@ -24,14 +30,17 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
   const flushing = useRef(false);
   const active = useRef(true);
   const savedCallback = useRef(onSessionSaved);
+  const recoveryCallback = useRef(onRecoveryChange);
   const bpmPending = useRef<Record<string, number>>({});
 
   useEffect(() => { savedCallback.current = onSessionSaved; }, [onSessionSaved]);
 
+  useEffect(() => { recoveryCallback.current = onRecoveryChange; }, [onRecoveryChange]);
+
   const store = useCallback((value: PracticeState) => {
     try {
-      localStorage.setItem(`drum-practice:v1:${userId.current}`, JSON.stringify(value));
-      localStorage.setItem(`drum-bpm-pending:${userId.current}`, JSON.stringify(bpmPending.current));
+      const available = persistPractice(localStorage, userId.current, value, bpmPending.current);
+      if (active.current) recoveryCallback.current(available);
     } catch { setStorageError("This browser cannot save recovery data. Keep this page open until your sessions are saved."); }
   }, []);
 
@@ -48,6 +57,7 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
 
   const flush = useCallback(async () => {
     if (flushing.current || !userId.current || !active.current || !current.current) return;
+    if (hasInvalidQuickDuration(current.current)) return;
     flushing.current = true;
     try {
       // Inserting with a stable client ID makes retries safe even when the
@@ -57,6 +67,7 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
         const session = current.current.pending[0];
         await saveCompletedPractice(supabase, userId.current, session);
         if (!active.current) return;
+        if (bpmPending.current[session.exercise_id] === session.bpm) delete bpmPending.current[session.exercise_id];
         if (current.current) commit({ ...current.current,
           pending: current.current.pending.filter(p => p.client_session_id !== session.client_session_id) });
         await savedCallback.current();
@@ -80,10 +91,10 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
     let cancelled = false;
     async function load() {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError) throw authError;
-        if (!user || cancelled) return;
-        userId.current = user.id;
+        const user = await practiceIdentity(supabase.auth);
+        if (cancelled) return;
+        setLoadError("");
+        userId.current = user.id; setLoaded(true);
         let recovered: PracticeState | null = null;
         try {
           recovered = parsePractice(localStorage.getItem(`drum-practice:v1:${user.id}`));
@@ -93,12 +104,13 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
               typeof bpm === "number" && Number.isFinite(bpm) && bpm >= 30 && bpm <= 300)) as Record<string, number>;
           }
         } catch { setStorageError("Recovery storage is unavailable in this browser."); }
-        if (recovered && (recovered.phase !== "complete" || recovered.pending.length)) {
+        if (recovered && (needsPracticeRecovery(recovered) || Object.keys(bpmPending.current).length)) {
           commit(recovered);
           setInterrupted(recovered.phase !== "complete");
           void flush();
           return;
         }
+        if (quickPractice) { blocked.current = false; return; }
         if (!routineId) { setMessage("No saved practice to continue. Go back and choose a routine."); return; }
         const { data: routine, error: routineError } = await supabase.from("practice_routines")
           .select("id").eq("id", routineId).eq("user_id", user.id).maybeSingle();
@@ -125,11 +137,11 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
         blocked.current = false;
         lastTick.current = performance.now();
         commit(createPractice(loaded));
-      } catch (error) { if (!cancelled) setMessage(`Could not load practice: ${error instanceof Error ? error.message : String(error)}`); }
+      } catch (error) { if (!cancelled) setLoadError(`Could not load practice: ${error instanceof Error ? error.message : String(error)}. Your saved practice has not been changed.`); }
     }
     void load();
     return () => { cancelled = true; active.current = false; };
-  }, [commit, flush, routineId]);
+  }, [commit, flush, routineId, quickPractice, loadAttempt]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -167,6 +179,13 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
       void audio.current?.close().catch(() => {}); audio.current = null;
     };
   }, [commit, flush, rememberBpm, store]);
+
+  useEffect(() => {
+    if (!loadError) return;
+    const retryLoad = () => setLoadAttempt(value => value + 1);
+    window.addEventListener("online", retryLoad);
+    return () => window.removeEventListener("online", retryLoad);
+  }, [loadError]);
 
   const pendingCount = state?.pending.length ?? 0;
   const bpm = state?.routine[state.index]?.bpm;
@@ -210,13 +229,12 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
       if (document.hidden || blocked.current) return;
       const context = audio.current;
       if (!context || context.state !== "running") return;
-      const main = phase !== "running" || tick % subdivision === 0;
-      const accent = tick % (4 * (phase === "running" ? subdivision : 1)) === 0;
-      sound(accent ? 1600 : main ? 1000 : 700, accent ? 0.25 : main ? 0.15 : 0.07);
+      const { frequency, volume } = metronomeClick(tick, subdivision, phase === "countIn");
+      sound(frequency, volume);
       tick++;
     };
     click();
-    const timer = window.setInterval(click, 60000 / bpm / (phase === "running" ? subdivision : 1));
+    const timer = window.setInterval(click, metronomeIntervalMs(bpm, subdivision, phase === "countIn"));
     return () => window.clearInterval(timer);
   }, [phase, bpm, subdivision, interrupted, sound]);
 
@@ -243,7 +261,7 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
     rememberBpm(next); commit(next);
   }
   function toggle() {
-    if (!current.current) return;
+    if (!current.current || hasInvalidQuickDuration(current.current)) return;
     unlockAudio();
     lastTick.current = performance.now();
     const next = togglePractice(current.current);
@@ -251,6 +269,7 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
     void flush();
   }
   function continuePractice() {
+    if (hasInvalidQuickDuration(current.current)) return;
     unlockAudio(); blocked.current = false; lastTick.current = performance.now(); setInterrupted(false);
     if (current.current?.phase === "countIn") commit({ ...current.current, countMs: 0 });
   }
@@ -269,13 +288,27 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
     onExit();
   }
   function endRoutine() {
-    if (!current.current || !window.confirm("End this routine? Completed exercises are kept; unfinished exercises will not be recorded.")) return;
+    if (!current.current || !window.confirm("End this practice? Completed exercises are kept; unfinished exercises will not be recorded.")) return;
     blocked.current = true;
     commit({ ...current.current, phase: "complete" });
     setInterrupted(false);
     void flush();
   }
 
+  async function clearInvalidPractice() {
+    const value = current.current;
+    if (!value || !hasInvalidQuickDuration(value) || !window.confirm("Clear this invalid fractional-minute Quick Practice? It will not be added to Statistics. Your Practice BPM will be kept.")) return;
+    blocked.current = true;
+    rememberBpm(value);
+    commit(clearInvalidQuickPractice(value));
+    setInterrupted(false);
+    setMessage("");
+    await flush();
+    await savedCallback.current();
+  }
+
+  const invalidDuration = hasInvalidQuickDuration(state);
+  const isQuick = state ? !!state.quickPractice : quickPractice;
   const exercise = state?.routine[state.index];
   const grooveUrl = exercises.find(item => item.id === exercise?.id)?.groove_scribe_url;
   const resting = phase === "rest" || phase === "restPaused";
@@ -283,41 +316,66 @@ export default function PracticePlayer({ routineId, exercises, onExit, onSession
   const button = "rounded-lg px-5 py-3 font-semibold disabled:opacity-40";
   return (
     <section className="rounded-xl bg-white p-4 shadow-md dark:bg-gray-900 dark:text-gray-100 sm:p-8">
-      <h2 className="text-2xl font-semibold">Practice Routine</h2>
+      <h2 className="text-2xl font-semibold">{!loaded ? "Loading practice" : isQuick ? "Quick Practice" : "Practice Routine"}</h2>
+      {loadError && <div role="alert" className="mt-4 text-amber-600">{loadError}<button onClick={() => setLoadAttempt(value => value + 1)} className="ml-3 underline">Retry loading practice</button></div>}
+      {isQuick && !interrupted && (!state || phase === "ready") && <div className="mt-4">
+        <label htmlFor="quick-exercise" className="mb-2 block">Exercise</label>
+        <select id="quick-exercise" value={exercise?.id ?? ""} disabled={!loaded}
+          onChange={event => {
+            const selected = exercises.find(item => item.id === event.target.value);
+            if (selected) commit(createQuickPractice(selected, createClientId(), bpmPending.current[selected.id]));
+          }} className="w-full rounded border bg-white p-3 dark:bg-gray-800 dark:text-gray-100">
+          <option value="" disabled>Choose an exercise</option>
+          {exercises.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+        {!exercises.length && <p className="mt-3">Add an exercise on the Exercises page first.</p>}
+      </div>}
+      {invalidDuration && <div role="alert" className="mt-4 rounded border border-amber-500 p-4">
+        <p>This saved Quick Practice used fractional minutes, which cannot be recorded. Clear it, then start a new practice of at least 1 whole minute. The invalid session will not add time to Statistics; your Practice BPM will be kept.</p>
+        <button onClick={() => void clearInvalidPractice()} className="mt-3 rounded bg-amber-600 px-4 py-3 text-white">Clear invalid Quick Practice</button>
+      </div>}
       {storageError && <p role="alert" className="mt-4 text-amber-600">{storageError}</p>}
       {message && <div role="alert" className="mt-4 text-amber-600">{message}<button onClick={() => void flush()} className="ml-3 underline">Retry save</button></div>}
       {pendingCount > 0 && <p role="status" className="mt-3">{pendingCount} completed exercise(s) waiting to save. Keep this page or return to Practice to retry.</p>}
       {interrupted && <div className="mt-4 rounded border border-blue-500 p-4">
         <p>Your practice is saved. Time away has not been counted. Continue restores the previous running or paused state.</p>
-        <button onClick={continuePractice} className={`${button} mt-3 bg-blue-600 text-white`}>Continue practice</button>
-        <button onClick={endRoutine} className={`${button} mt-3 text-gray-700 dark:text-gray-300`}>End saved routine</button>
+        <button onClick={continuePractice} disabled={invalidDuration} className={`${button} mt-3 bg-blue-600 text-white`}>Continue practice</button>
+        <button onClick={endRoutine} className={`${button} mt-3 text-gray-700 dark:text-gray-300`}>{isQuick ? "End saved practice" : "End saved routine"}</button>
       </div>}
-      {phase === "complete" ? <div className="mt-8 text-center"><h3 className="text-2xl font-bold">Routine complete</h3>
+      {phase === "complete" ? <div className="mt-8 text-center"><h3 className="text-2xl font-bold">{isQuick ? "Practice complete" : "Routine complete"}</h3>
         <p className="mt-3">Completed exercises are saved individually. Skipped exercises are not recorded.</p>
-        <button onClick={exit} className={`${button} mt-6 bg-gray-600 text-white`}>Back to routine</button></div> : exercise && state ? <>
-        <p className="mt-4 text-center">Exercise {state.index + 1} of {state.routine.length}</p>
+        <button onClick={exit} className={`${button} mt-6 bg-gray-600 text-white`}>{isQuick ? "Back to Practice" : "Back to routine"}</button></div> : exercise && state ? <>
+        {!isQuick && <p className="mt-4 text-center">Exercise {state.index + 1} of {state.routine.length}</p>}
         <div className="mt-8 text-center">
           <h3 className="text-3xl font-bold">{exercise.name}</h3>
           <p className="mt-6">Practice BPM</p><p className="text-6xl font-bold text-blue-600">{exercise.bpm}</p>
+          {isQuick && phase === "ready" && <input aria-label="Enter Practice BPM" type="number" min="30" max="300" value={exercise.bpm}
+            onChange={event => changeBpm(Number(event.target.value))}
+            className="mt-4 w-28 rounded border bg-white p-3 dark:bg-gray-800 dark:text-gray-100" />}
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {[-5, -1, 1, 5].map(delta => <button key={delta} aria-label={`Change BPM by ${delta}`} onClick={() => changeBpm(exercise.bpm + delta)}
               disabled={interrupted || phase === "running" || phase === "countIn"} className={`${button} bg-gray-200 text-gray-900`}>{delta > 0 ? "+" : ""}{delta}</button>)}
           </div>
           <input aria-label="Practice BPM" type="range" min="30" max="300" value={exercise.bpm}
             onChange={e => changeBpm(Number(e.target.value))} disabled={interrupted || phase === "running" || phase === "countIn"} className="mt-4 w-full max-w-md" />
-          <div className="mt-4"><label htmlFor="subdivision">Metronome: </label>
+          {isQuick && phase === "ready" && <div className="mt-4">
+            <label htmlFor="quick-duration" className="mb-2 block">Duration (whole minutes)</label>
+            <input id="quick-duration" type="number" min="1" max="180" step="1" value={exercise.duration}
+              onChange={event => commit(changePracticeDuration(state, Number(event.target.value)))}
+              className="w-28 rounded border bg-white p-3 dark:bg-gray-800 dark:text-gray-100" />
+          </div>}
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2"><label htmlFor="subdivision">Metronome: </label>
             <select id="subdivision" value={subdivision} disabled={interrupted || phase === "countIn"}
-              onChange={e => { if (current.current) commit({ ...current.current, subdivision: Number(e.target.value) }); }} className="rounded border p-2">
-              <option value={1}>Quarter notes</option><option value={2}>Eighth notes</option>
-              <option value={3}>Eighth-note triplets</option><option value={4}>Sixteenth notes</option>
+              onChange={e => { if (current.current) commit(changePracticeSubdivision(current.current, Number(e.target.value))); }} className="max-w-full rounded border bg-white p-2 dark:bg-gray-800 dark:text-gray-100">
+              {SUBDIVISIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select></div>
           <p className="mt-8">{resting ? (phase === "restPaused" ? "Rest paused" : "Rest") : "Time remaining"}</p>
           <p className="text-5xl font-bold">{resting ? `${seconds}s` : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`}</p>
           {phase === "countIn" && <p className="mt-6 text-4xl font-bold text-green-600">Count In: {Math.min(4, Math.floor(state.countMs / (60000 / exercise.bpm)) + 1)}</p>}
           <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <button onClick={toggle} disabled={interrupted || phase === "countIn"} className={`${button} bg-green-600 text-white`}>
+            <button onClick={toggle} disabled={invalidDuration || interrupted || phase === "countIn"} className={`${button} bg-green-600 text-white`}>
               {phase === "restPaused" ? "Resume Rest" : phase === "rest" ? "Pause Rest" : phase === "running" ? "Pause" : phase === "countIn" ? "Counting In…" : phase === "paused" ? "Resume" : "Start"}</button>
-            <button onClick={skip} disabled={interrupted || resting} className={`${button} bg-amber-600 text-white`}>Skip</button>
+            {!isQuick && <button onClick={skip} disabled={interrupted || resting} className={`${button} bg-amber-600 text-white`}>Skip</button>}
             <button onClick={exit} className={`${button} bg-gray-600 text-white`}>Exit</button>
           </div>
         </div>

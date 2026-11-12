@@ -24,6 +24,9 @@ export async function savePracticeBpm(database: PracticeDatabase, userId: string
 }
 
 export async function saveCompletedPractice(database: PracticeDatabase, userId: string, session: PendingSession) {
+  if (!Number.isSafeInteger(session.minutes) || session.minutes <= 0) {
+    throw new Error("Practice duration must be a positive whole number of minutes. Fractional minutes cannot be saved.");
+  }
   const { error } = await database.from("drum_sessions").upsert(
     { ...session, user_id: userId },
     { onConflict: "user_id,client_session_id", ignoreDuplicates: true });

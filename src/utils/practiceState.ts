@@ -1,3 +1,17 @@
+export const SUBDIVISIONS = [
+  { value: 1, label: "Quarter notes" },
+  { value: 2, label: "Eighth notes" },
+  { value: 3, label: "Eighth-note triplets" },
+  { value: 4, label: "Sixteenth notes" },
+  { value: 5, label: "Quintuplets" },
+  { value: 7, label: "Septuplets" },
+  { value: 8, label: "32nd notes" },
+] as const;
+
+export function isSubdivision(value: number): boolean {
+  return SUBDIVISIONS.some(option => option.value === value);
+}
+
 export type PracticeExercise = {
   id: string; name: string; target_bpm: number; bpm: number; duration: number;
   sessionId: string;
@@ -7,10 +21,39 @@ export type PendingSession = {
 };
 export type Phase = "ready" | "countIn" | "running" | "paused" | "rest" | "restPaused" | "complete";
 export type PracticeState = {
+  quickPractice?: boolean;
   version: 1; routine: PracticeExercise[]; index: number; phase: Phase;
   remainingMs: number; restMs: number; countMs: number; subdivision: number;
   pending: PendingSession[];
 };
+
+export function createQuickPractice(
+  exercise: { id: string; name: string; target_bpm: number; last_practice_bpm?: number | null; starting_bpm?: number },
+  sessionId: string, rememberedBpm?: number,
+): PracticeState {
+  const bpm = rememberedBpm ?? exercise.last_practice_bpm ?? exercise.starting_bpm ?? 60;
+  return { ...createPractice([{ id: exercise.id, name: exercise.name, target_bpm: exercise.target_bpm,
+    bpm, duration: 1, sessionId }]), quickPractice: true };
+}
+
+export function changePracticeDuration(state: PracticeState, minutes: number): PracticeState {
+  if (state.phase !== "ready" || !Number.isFinite(minutes) || minutes <= 0 || minutes > 180 ||
+    (state.quickPractice && !Number.isInteger(minutes))) return state;
+  return { ...state, remainingMs: minutes * 60000, routine: state.routine.map((item, index) =>
+    index === state.index ? { ...item, duration: minutes } : item) };
+}
+
+// Keep parsing legacy decimal recovery data so users can resolve it explicitly
+// instead of silently dropping pending saves or rounding Statistics upward.
+export function hasInvalidQuickDuration(state: PracticeState | null): boolean {
+  return !!state?.quickPractice && ((state.phase !== "complete" && state.routine.some(item => !Number.isInteger(item.duration))) ||
+    state.pending.some(item => !Number.isInteger(item.minutes)));
+}
+
+export function clearInvalidQuickPractice(state: PracticeState): PracticeState {
+  if (!hasInvalidQuickDuration(state)) return state;
+  return { ...state, phase: "complete", pending: state.pending.filter(item => Number.isInteger(item.minutes)) };
+}
 
 export function createPractice(routine: PracticeExercise[], pending: PendingSession[] = []): PracticeState {
   return { version: 1, routine, index: 0, phase: routine.length ? "ready" : "complete",
@@ -58,6 +101,10 @@ export function changePracticeBpm(state: PracticeState, bpm: number): PracticeSt
     ? { ...item, bpm: Math.max(30, Math.min(300, Math.round(bpm))) } : item) };
 }
 
+export function changePracticeSubdivision(state: PracticeState, subdivision: number): PracticeState {
+  return isSubdivision(subdivision) ? { ...state, subdivision } : state;
+}
+
 export function togglePractice(state: PracticeState): PracticeState {
   const phases: Partial<Record<Phase, Phase>> = {
     ready: "countIn", running: "paused", paused: "countIn", rest: "restPaused", restPaused: "rest",
@@ -72,7 +119,7 @@ export function parsePractice(raw: string | null): PracticeState | null {
     if (s.version !== 1 || !Array.isArray(s.routine) || !s.routine.length ||
       !Number.isInteger(s.index) || s.index < 0 || s.index >= s.routine.length ||
       !["ready", "countIn", "running", "paused", "rest", "restPaused", "complete"].includes(s.phase) ||
-      ![1, 2, 3, 4].includes(s.subdivision) ||
+      !isSubdivision(s.subdivision) ||
       ![s.remainingMs, s.restMs, s.countMs].every(n => Number.isFinite(n) && n >= 0) ||
       !s.routine.every(e => typeof e.id === "string" && typeof e.sessionId === "string" &&
         typeof e.name === "string" && Number.isFinite(e.bpm) && e.bpm >= 30 && e.bpm <= 300 &&
