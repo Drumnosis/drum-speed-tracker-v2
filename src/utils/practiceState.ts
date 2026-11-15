@@ -4,6 +4,7 @@ export const SUBDIVISIONS = [
   { value: 3, label: "Eighth-note triplets" },
   { value: 4, label: "Sixteenth notes" },
   { value: 5, label: "Quintuplets" },
+  { value: 6, label: "Sextuplets" },
   { value: 7, label: "Septuplets" },
   { value: 8, label: "32nd notes" },
 ] as const;

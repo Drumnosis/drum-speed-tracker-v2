@@ -34,14 +34,21 @@ function mount(env, quickPractice=false) {
     useEffect(fn,deps){const i=cursor++;if(!same(slots[i]?.deps,deps)){const old=slots[i];slots[i]={deps,cleanup:old?.cleanup};effects.push(()=>{slots[i].cleanup?.();slots[i].cleanup=fn();});}},
   };
   const noop=()=>{};
-  const window={setInterval(fn,ms){timers.set(++timerId,{fn,ms});return timerId;},clearInterval:id=>timers.delete(id),addEventListener:noop,removeEventListener:noop,confirm:()=>true};
+  const clicks=[];
+  class AudioContext {
+    state='running';currentTime=0;destination={};
+    async resume(){this.state='running';} async suspend(){this.state='suspended';} async close(){this.state='closed';}
+    createOscillator(){const oscillator={frequency:{value:0},connect:noop,disconnect:noop,start:()=>clicks.push(oscillator.frequency.value),stop:noop};return oscillator;}
+    createGain(){return {gain:{setValueAtTime:noop,exponentialRampToValueAtTime:noop},connect:noop,disconnect:noop};}
+  }
+  const window={AudioContext,setInterval(fn,ms){timers.set(++timerId,{fn,ms});return timerId;},clearInterval:id=>timers.delete(id),addEventListener:noop,removeEventListener:noop,confirm:()=>true};
   const modules={react,'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},'@/services/supabase':{supabase:env.db},'@/services/practiceIdentity':identity,'@/services/practiceSessions':sessions,'@/utils/practiceRecovery':recovery,'@/utils/practiceState':state,'@/utils/clientId':{createClientId:()=> 'stable-id'},'@/utils/metronome':metronome,'./GrooveNotation':{default:()=>null}};
   const exports={};vm.runInNewContext(source,{exports,require:name=>{assert.ok(modules[name],name);return modules[name];},window,document:{hidden:false,addEventListener:noop,removeEventListener:noop},navigator:{},localStorage:env.storage,performance:{now:()=>now},console});
   const props={quickPractice,routineId:null,exercises:[exercise],onExit:noop,onSessionSaved:async()=>{refreshes++;},onRecoveryChange:value=>{available=value;}};
   function render(){cursor=0;effects=[];tree=exports.default(props);for(const fn of effects)fn();}
   render();
   const nodes=()=>{const found=[];function visit(n){if(!n||typeof n!=='object')return;if(Array.isArray(n)){n.forEach(visit);return;}found.push(n);visit(n.props?.children);}visit(tree);return found;};
-  return {async settle(){for(let i=0;i<30;i++)await Promise.resolve();},nodes,available:()=>available,refreshes:()=>refreshes,
+  return {clicks, pulse(){for(const timer of [...timers.values()])if(timer.ms!==100&&timer.ms!==15000)timer.fn();}, intervals:()=>[...timers.values()].map(t=>t.ms),async settle(){for(let i=0;i<30;i++)await Promise.resolve();},nodes,available:()=>available,refreshes:()=>refreshes,
     tick(ms){now+=ms;for(const timer of [...timers.values()])if(timer.ms===100)timer.fn();},
     unmount(){alive=false;for(const slot of slots)slot?.cleanup?.();},
     button(label){const node=nodes().find(n=>n.type==='button'&&n.props.children===label);assert.ok(node,`Missing ${label}`);node.props.onClick();},
@@ -110,4 +117,32 @@ test('clearing legacy invalid save offline retains BPM for retry but never inser
   player.button('Clear invalid Quick Practice');await player.settle();assert.equal(player.available(),true);assert.equal(env.writes(),0);
   assert.deepEqual(JSON.parse(env.storage.getItem('drum-practice:v1:user')).pending,[]);
   env.setBpmOffline(false);player.button('Retry save');await player.settle();assert.equal(env.remembered(),83);assert.equal(env.rows.size,0);assert.equal(player.available(),false);player.unmount();
+});
+
+for (const quick of [false,true]) test(`real player mute preserves timer, BPM and session (${quick ? 'Quick Practice' : 'routine'})`, async()=>{
+  const env=environment();
+  const initial=quick ? state.createQuickPractice(exercise,'muted-session') : state.createPractice([{...exercise,bpm:60,duration:1,sessionId:'muted-session'},{...exercise,id:'b',bpm:80,duration:1,sessionId:'next-session'}]);
+  env.storage.setItem('drum-practice:v1:user',JSON.stringify(initial));
+  const player=mount(env,quick);await player.settle();player.button('Continue practice');await player.settle();
+  const snapshot=()=>JSON.parse(env.storage.getItem('drum-practice:v1:user'));
+  const select=value=>player.nodes().find(n=>n.props?.id==='subdivision').props.onChange({target:{value:String(value)}});
+  assert.ok(player.nodes().some(n=>n.type==='button'&&n.props.children==='Metronome On'));
+  player.button('Metronome On');await player.settle();assert.deepEqual(snapshot(),initial);
+  player.button('Start');await player.settle();assert.equal(player.clicks.length,1);
+  for(let i=0;i<3;i++)player.pulse();assert.equal(player.clicks.length,4,'count-in stays audible when muted');
+  const counting=snapshot();player.button('Metronome Off');await player.settle();player.button('Metronome On');await player.settle();
+  assert.equal(player.clicks.length,4,'toggle does not restart count-in');assert.deepEqual(snapshot(),counting);
+  player.tick(4000);await player.settle();const count=player.clicks.length;
+  player.pulse();player.tick(1000);await player.settle();assert.equal(player.clicks.length,count);assert.equal(snapshot().remainingMs,59000);
+  const bpm=player.nodes().find(n=>n.props?.['aria-label']==='Practice BPM');assert.equal(bpm.props.disabled,false);
+  bpm.props.onChange({target:{value:'90'}});await player.settle();assert.equal(snapshot().routine[0].bpm,90);
+  select(6);await player.settle();const before=snapshot();
+  player.button('Metronome Off');await player.settle();assert.deepEqual(snapshot(),before);assert.equal(player.clicks.length,count+1);
+  assert.ok(player.intervals().some(ms=>Math.abs(ms-60000/90/6)<1e-8));
+  player.pulse();assert.equal(player.clicks.at(-1),700);
+  select(3);await player.settle();assert.deepEqual(snapshot(),{...before,subdivision:3});
+  player.button('Metronome On');await player.settle();player.tick(59000);await player.settle();
+  assert.equal(env.rows.size,1);const row=[...env.rows.values()][0];assert.equal(row.bpm,90);assert.equal(row.minutes,1);assert.equal(row.client_session_id,'muted-session');assert.equal(env.remembered(),90);
+  if(!quick){assert.equal(snapshot().phase,'rest');assert.equal(snapshot().index,0);const sounds=player.clicks.length;player.tick(1000);await player.settle();assert.equal(snapshot().restMs,14000);assert.equal(player.clicks.length,sounds+1,'rest pulses remain audible');}
+  player.unmount();
 });

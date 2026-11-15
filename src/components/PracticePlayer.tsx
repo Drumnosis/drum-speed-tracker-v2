@@ -22,6 +22,7 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
   const [interrupted, setInterrupted] = useState(false);
   const [message, setMessage] = useState("");
   const [storageError, setStorageError] = useState("");
+  const [metronomeOn, setMetronomeOn] = useState(true);
   const current = useRef<PracticeState | null>(null);
   const userId = useRef("");
   const blocked = useRef(true);
@@ -200,6 +201,7 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
   };
 
   const phase = state?.phase;
+  const clicksEnabled = phase === "countIn" || metronomeOn;
   const subdivision = state?.subdivision ?? 1;
   const restSeconds = Math.ceil((state?.restMs ?? 0) / 1000);
   const sound = useCallback((frequency: number, volume: number, rest = false) => {
@@ -224,6 +226,7 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
 
   useEffect(() => {
     if (interrupted || !bpm || !["countIn", "running"].includes(phase ?? "")) return;
+    if (!clicksEnabled) return;
     let tick = 0;
     const click = () => {
       if (document.hidden || blocked.current) return;
@@ -236,7 +239,7 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
     click();
     const timer = window.setInterval(click, metronomeIntervalMs(bpm, subdivision, phase === "countIn"));
     return () => window.clearInterval(timer);
-  }, [phase, bpm, subdivision, interrupted, sound]);
+  }, [phase, bpm, subdivision, interrupted, sound, clicksEnabled]);
 
   useEffect(() => {
     if (!phase || phase === "ready" || phase === "complete" || interrupted || !("wakeLock" in navigator)) return;
@@ -354,16 +357,23 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
             className="mt-4 w-28 rounded border bg-white p-3 dark:bg-gray-800 dark:text-gray-100" />}
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {[-5, -1, 1, 5].map(delta => <button key={delta} aria-label={`Change BPM by ${delta}`} onClick={() => changeBpm(exercise.bpm + delta)}
-              disabled={interrupted || phase === "running" || phase === "countIn"} className={`${button} bg-gray-200 text-gray-900`}>{delta > 0 ? "+" : ""}{delta}</button>)}
+              disabled={interrupted || phase === "countIn"} className={`${button} bg-gray-200 text-gray-900`}>{delta > 0 ? "+" : ""}{delta}</button>)}
           </div>
           <input aria-label="Practice BPM" type="range" min="30" max="300" value={exercise.bpm}
-            onChange={e => changeBpm(Number(e.target.value))} disabled={interrupted || phase === "running" || phase === "countIn"} className="mt-4 w-full max-w-md" />
+            onChange={e => changeBpm(Number(e.target.value))} disabled={interrupted || phase === "countIn"} className="mt-4 w-full max-w-md" />
           {isQuick && phase === "ready" && <div className="mt-4">
             <label htmlFor="quick-duration" className="mb-2 block">Duration (whole minutes)</label>
             <input id="quick-duration" type="number" min="1" max="180" step="1" value={exercise.duration}
               onChange={event => commit(changePracticeDuration(state, Number(event.target.value)))}
               className="w-28 rounded border bg-white p-3 dark:bg-gray-800 dark:text-gray-100" />
           </div>}
+          <div className="mt-4">
+            <button type="button" aria-pressed={metronomeOn} onClick={() => {
+              unlockAudio(); setMetronomeOn(value => !value);
+            }} className={`${button} bg-gray-200 text-gray-900`}>
+              {metronomeOn ? "Metronome On" : "Metronome Off"}
+            </button>
+          </div>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2"><label htmlFor="subdivision">Metronome: </label>
             <select id="subdivision" value={subdivision} disabled={interrupted || phase === "countIn"}
               onChange={e => { if (current.current) commit(changePracticeSubdivision(current.current, Number(e.target.value))); }} className="max-w-full rounded border bg-white p-2 dark:bg-gray-800 dark:text-gray-100">

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { metronomeIntervalMs, metronomeClick } from '../src/utils/metronome.ts';
 import { SUBDIVISIONS, isSubdivision, advancePractice, changePracticeSubdivision, createPractice, parsePractice, togglePractice } from '../src/utils/practiceState.ts';
 
-const values = [1, 2, 3, 4, 5, 7, 8];
+const values = [1, 2, 3, 4, 5, 6, 7, 8];
 const routine = [
   { id: 'a', name: 'Singles', target_bpm: 150, bpm: 60, duration: 1, sessionId: 'first' },
   { id: 'b', name: 'Doubles', target_bpm: 160, bpm: 80, duration: 2, sessionId: 'second' },
@@ -13,7 +13,7 @@ test('selector retains existing options and adds only the requested subdivisions
   assert.deepEqual(SUBDIVISIONS.map(option => option.value), values);
   assert.deepEqual(SUBDIVISIONS.map(option => option.label), [
     'Quarter notes', 'Eighth notes', 'Eighth-note triplets', 'Sixteenth notes',
-    'Quintuplets', 'Septuplets', '32nd notes',
+    'Quintuplets', 'Sextuplets', 'Septuplets', '32nd notes',
   ]);
 });
 
@@ -100,7 +100,7 @@ test('new subdivisions do not change elapsed practice or rest time or pause/resu
 
 test('unsupported subdivisions remain rejected without corrupting recovery', () => {
   const state = createPractice(routine);
-  for (const subdivision of [0, 6, 9, -1, 1.5, NaN, Infinity, '5', null]) {
+  for (const subdivision of [0, 9, -1, 1.5, NaN, Infinity, '5', null]) {
     assert.equal(isSubdivision(subdivision), false);
     assert.strictEqual(changePracticeSubdivision(state, subdivision), state);
     assert.equal(parsePractice(JSON.stringify({ ...state, subdivision })), null);
