@@ -18,10 +18,12 @@ export type PracticeExercise = {
   sessionId: string;
 };
 export type PendingSession = {
+  reset_progress?: boolean;
   client_session_id: string; exercise_id: string; bpm: number; minutes: number; created_at: string;
 };
 export type Phase = "ready" | "countIn" | "running" | "paused" | "rest" | "restPaused" | "complete";
 export type PracticeState = {
+  bpmResets?: Record<string, number>;
   quickPractice?: boolean;
   version: 1; routine: PracticeExercise[]; index: number; phase: Phase;
   remainingMs: number; restMs: number; countMs: number; subdivision: number;
@@ -89,10 +91,14 @@ export function advancePractice(state: PracticeState, elapsedMs: number, now: nu
   const remainingMs = Math.max(0, state.remainingMs - elapsed);
   if (remainingMs > 0) return { ...state, remainingMs };
   const pending = state.pending.some(item => item.client_session_id === exercise.sessionId)
-    ? state.pending : [...state.pending, { client_session_id: exercise.sessionId,
+    ? state.pending : [...state.pending, {
+      ...(state.bpmResets?.[exercise.id] === exercise.bpm ? { reset_progress: true } : {}),
+      client_session_id: exercise.sessionId,
       exercise_id: exercise.id, bpm: exercise.bpm, minutes: exercise.duration,
       created_at: new Date(now).toISOString() }];
-  return { ...state, remainingMs: 0, pending, restMs: 15000,
+  const bpmResets = state.bpmResets ? { ...state.bpmResets } : undefined;
+  if (bpmResets?.[exercise.id] === exercise.bpm) delete bpmResets[exercise.id];
+  return { ...state, ...(bpmResets ? { bpmResets } : {}), remainingMs: 0, pending, restMs: 15000,
     phase: state.index < state.routine.length - 1 ? "rest" : "complete" };
 }
 
@@ -121,11 +127,14 @@ export function parsePractice(raw: string | null): PracticeState | null {
       !Number.isInteger(s.index) || s.index < 0 || s.index >= s.routine.length ||
       !["ready", "countIn", "running", "paused", "rest", "restPaused", "complete"].includes(s.phase) ||
       !isSubdivision(s.subdivision) ||
+      (s.bpmResets !== undefined && (!s.bpmResets || typeof s.bpmResets !== "object" || Array.isArray(s.bpmResets) ||
+        !Object.values(s.bpmResets).every(bpm => Number.isInteger(bpm) && bpm >= 30 && bpm <= 300))) ||
       ![s.remainingMs, s.restMs, s.countMs].every(n => Number.isFinite(n) && n >= 0) ||
       !s.routine.every(e => typeof e.id === "string" && typeof e.sessionId === "string" &&
         typeof e.name === "string" && Number.isFinite(e.bpm) && e.bpm >= 30 && e.bpm <= 300 &&
         Number.isFinite(e.duration) && e.duration > 0) || !Array.isArray(s.pending) ||
       !s.pending.every(p => typeof p.client_session_id === "string" && typeof p.exercise_id === "string" &&
+        (p.reset_progress === undefined || typeof p.reset_progress === "boolean") &&
         Number.isFinite(p.bpm) && p.bpm > 0 && Number.isFinite(p.minutes) && p.minutes > 0 &&
         Number.isFinite(Date.parse(p.created_at)))) return null;
     return s;

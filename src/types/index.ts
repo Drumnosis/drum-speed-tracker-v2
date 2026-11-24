@@ -1,10 +1,15 @@
 export type Exercise = {
   id: string;
   name: string;
+  archived?: boolean;
   target_bpm: number;
   starting_bpm?: number;
   last_practice_bpm?: number | null;
   groove_scribe_url?: string | null;
+  auto_progress_enabled?: boolean;
+  auto_progress_after?: number;
+  auto_progress_by?: number;
+  auto_progress_count?: number;
   lifetime_goal_minutes: number;
 };
 

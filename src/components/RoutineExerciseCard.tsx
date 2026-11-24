@@ -34,7 +34,7 @@ export default function RoutineExerciseCard({
     <div className="rounded-lg border p-4 space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="font-semibold">{exercise.name}</h3>
+          <h3 className="font-semibold">{exercise.name}{exercise.archived && <span className="ml-2 text-sm font-normal">(Archived)</span>}</h3>
 
           <p className="text-sm text-gray-500">
             Target BPM: {exercise.target_bpm}

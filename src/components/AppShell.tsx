@@ -7,6 +7,7 @@ import ExerciseList from "@/components/ExerciseList";
 import Navigation from "@/components/Navigation";
 import RoutineBuilder from "@/components/RoutineBuilder";
 import PracticePlayer from "@/components/PracticePlayer";
+import { formatSupabaseError, loadExercises } from "@/services/exerciseQueries";
 import { practiceIdentity } from "@/services/practiceIdentity";
 import { needsPracticeRecovery } from "@/utils/practiceRecovery";
 import { parsePractice } from "@/utils/practiceState";
@@ -26,11 +27,13 @@ export default function AppShell() {
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
   const [playingRoutineId, setPlayingRoutineId] = useState<string | null>(null);
 
+  const [showArchived, setShowArchived] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [sessions, setSessions] = useState<DrumSession[]>([]);
   const [recoveryIsQuick, setRecoveryIsQuick] = useState(false);
   const [hasRecovery, setHasRecovery] = useState(false);
   const [dataError, setDataError] = useState("");
+  const [schemaWarning, setSchemaWarning] = useState("");
 
   useEffect(() => {
     loadData();
@@ -45,27 +48,33 @@ export default function AppShell() {
       setRecoveryIsQuick(saved?.quickPractice === true);
     } catch { /* Practice will explain if recovery storage is unavailable. */ }
 
-    const { data: exerciseData, error: exerciseError } = await supabase
-      .from("exercises")
-      .select("id, name, target_bpm, starting_bpm, last_practice_bpm, lifetime_goal_minutes, groove_scribe_url")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: true });
+    const { data: exerciseData, error: exerciseError, status: exerciseStatus, progressionError } =
+      await loadExercises(supabase, user.id);
 
     if (exerciseError) {
-      console.error(exerciseError);
-      setDataError(`Could not load exercises: ${exerciseError.message}. Apply the supplied Supabase migration before testing this update.`);
+      const message = `Could not load exercises. ${formatSupabaseError(exerciseError, exerciseStatus)}`;
+      console.error(message);
+      setDataError(message);
       return;
     }
 
-    const { data: sessionData, error: sessionError } = await supabase
+    if (progressionError) {
+      console.warn(`Loaded exercises without Auto Progression fields. ${progressionError}`);
+    }
+    setSchemaWarning(progressionError
+      ? `This database is missing Auto Progression fields. Apply 202611150001_exercise_auto_progression.sql to enable exercise creation and practice recording. ${progressionError}`
+      : "");
+
+    const { data: sessionData, error: sessionError, status: sessionStatus } = await supabase
       .from("drum_sessions")
       .select("id, exercise_id, bpm, minutes, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (sessionError) {
-      console.error(sessionError);
-      setDataError(`Could not load sessions: ${sessionError.message}`);
+      const message = `Could not load sessions. ${formatSupabaseError(sessionError, sessionStatus)}`;
+      console.error(message);
+      setDataError(message);
       return;
     }
 
@@ -110,6 +119,7 @@ const totalPracticeMinutes = sessions.reduce(
           }}
         />
         {dataError && <p role="alert" className="mb-4 text-red-600">{dataError} <button onClick={() => void loadData()} className="underline">Retry refresh</button></p>}
+        {schemaWarning && <p role="status" className="mb-4 text-amber-700 dark:text-amber-300">{schemaWarning}</p>}
         {hasRecovery && !(currentPage === "practice" && practiceMode === "player") && (
           <div className="mb-4 rounded-lg border border-blue-500 p-4 dark:text-gray-100">
             <p>You have saved practice to continue, or completed exercises waiting to save.</p>
@@ -179,13 +189,18 @@ const totalPracticeMinutes = sessions.reduce(
         {currentPage === "exercises" && (
           <section className="rounded-xl bg-white p-4 shadow-md dark:bg-gray-900 dark:text-gray-100 sm:p-8">
             <h2 className="mb-6 text-2xl font-semibold">
-              Exercises
+              {showArchived ? "Archived Exercises" : "Exercises"}
             </h2>
 
-            <AddExerciseForm onExerciseAdded={loadData} />
+            <button type="button" onClick={() => setShowArchived(value => !value)}
+              className="mb-4 rounded border px-4 py-2">
+              {showArchived ? "Back to Exercises" : "View Archived Exercises"}
+            </button>
+            {!showArchived && <AddExerciseForm onExerciseAdded={loadData} />}
 
             <ExerciseList
-              exercises={exercises}
+              exercises={exercises.filter(exercise => Boolean(exercise.archived) === showArchived)}
+              emptyMessage={showArchived ? "No archived exercises." : "No active exercises yet."}
               sessions={sessions}
               onExercisesChanged={loadData}
             />

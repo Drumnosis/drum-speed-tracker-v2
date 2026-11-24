@@ -4,6 +4,7 @@ import { useState } from "react";
 import { supabase } from "@/services/supabase";
 import { getGrooveScribeLink } from "@/utils/grooveScribe";
 import GrooveScribeField from "./GrooveScribeField";
+import AutoProgressFields, { defaultProgressSettings } from "./AutoProgressFields";
 
 type AddExerciseFormProps = {
   onExerciseAdded: () => Promise<void>;
@@ -19,6 +20,7 @@ export default function AddExerciseForm({
   const [targetBpm, setTargetBpm] = useState<number | "">(60);
   const [startingBpm, setStartingBpm] = useState<number | "">(60);
   const [grooveUrl, setGrooveUrl] = useState("");
+  const [progress, setProgress] = useState(defaultProgressSettings);
 
   async function addExercise() {
    if (!exerciseName.trim() || !Number.isFinite(targetBpm) || Number(targetBpm) <= 0 ||
@@ -53,6 +55,7 @@ export default function AddExerciseForm({
       target_minutes: 0,
       lifetime_goal_minutes: lifetimeGoalMinutes,
       groove_scribe_url: link?.original ?? null,
+      ...progress,
     });
 
     if (error) {
@@ -60,6 +63,7 @@ export default function AddExerciseForm({
     } else {
       setExerciseName("");
       setGrooveUrl("");
+      setProgress(defaultProgressSettings);
       setMessage("Exercise saved.");
       await onExerciseAdded();
     }
@@ -140,6 +144,7 @@ inputMode="numeric"
       </button>
     </div>
 
+    <div className="mt-4"><AutoProgressFields value={progress} onChange={setProgress} disabled={saving} /></div>
     {message && (
       <p role="status" className="mt-4 text-sm text-gray-600 dark:text-gray-300">
         {message}

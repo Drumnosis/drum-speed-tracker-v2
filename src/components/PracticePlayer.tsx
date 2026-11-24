@@ -23,6 +23,9 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
   const [message, setMessage] = useState("");
   const [storageError, setStorageError] = useState("");
   const [metronomeOn, setMetronomeOn] = useState(true);
+  const [progressExercises, setProgressExercises] = useState<Record<string, Exercise>>({});
+  const [progressSaving, setProgressSaving] = useState(false);
+  const [progressError, setProgressError] = useState("");
   const current = useRef<PracticeState | null>(null);
   const userId = useRef("");
   const blocked = useRef(true);
@@ -65,19 +68,35 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
       // previous response was lost after the database committed the session.
       do {
       while (active.current && current.current?.pending.length) {
-        const session = current.current.pending[0];
-        await saveCompletedPractice(supabase, userId.current, session);
+        const session: PracticeState["pending"][number] = current.current.pending[0];
+        const updated = await saveCompletedPractice(supabase, userId.current, session);
         if (!active.current) return;
-        if (bpmPending.current[session.exercise_id] === session.bpm) delete bpmPending.current[session.exercise_id];
+        setProgressExercises(values => ({ ...values, [updated.id]: updated }));
+        if (bpmPending.current[session.exercise_id] === session.bpm &&
+          current.current?.bpmResets?.[session.exercise_id] !== session.bpm) delete bpmPending.current[session.exercise_id];
         if (current.current) commit({ ...current.current,
+          // A later appearance of the exercise may use the earned BPM. Never
+          // change an exercise that has already begun, even on a slow retry.
+          routine: current.current.routine.map((item, index) => item.id === updated.id &&
+            (index > current.current!.index || (index === current.current!.index && current.current!.phase === "ready")) &&
+            bpmPending.current[item.id] === undefined
+            ? { ...item, bpm: updated.last_practice_bpm ?? item.bpm } : item),
           pending: current.current.pending.filter(p => p.client_session_id !== session.client_session_id) });
         await savedCallback.current();
         if (!active.current) return;
       }
       for (const [id, bpm] of Object.entries(bpmPending.current)) {
-        await savePracticeBpm(supabase, userId.current, id, bpm);
+        const resetProgress = current.current?.bpmResets?.[id] === bpm;
+        await savePracticeBpm(supabase, userId.current, id, bpm, resetProgress);
         if (!active.current) return;
         if (bpmPending.current[id] === bpm) delete bpmPending.current[id];
+        if (resetProgress && current.current?.bpmResets?.[id] === bpm) {
+          const bpmResets = { ...current.current.bpmResets };
+          delete bpmResets[id];
+          commit({ ...current.current, bpmResets });
+          setProgressExercises(values => values[id]
+            ? { ...values, [id]: { ...values[id], last_practice_bpm: bpm, auto_progress_count: 0 } } : values);
+        }
         if (current.current) store(current.current);
       }
       } while (current.current?.pending.length);
@@ -121,7 +140,7 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
           .select("exercise_id, bpm, duration").eq("routine_id", routine.id).order("position");
         if (itemsError) throw itemsError;
         const { data: exercises, error: exerciseError } = await supabase.from("exercises")
-          .select("id, name, target_bpm, starting_bpm, last_practice_bpm").eq("user_id", user.id);
+          .select("id, name, target_bpm, starting_bpm, last_practice_bpm, auto_progress_enabled, auto_progress_after, auto_progress_by, auto_progress_count").eq("user_id", user.id);
         if (exerciseError) throw exerciseError;
         if (cancelled) return;
         const loaded: PracticeExercise[] = [];
@@ -261,14 +280,22 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
   function changeBpm(value: number) {
     if (!current.current) return;
     const next = changePracticeBpm(current.current, value);
-    rememberBpm(next); commit(next);
+    const item = next.routine[next.index];
+    const previous = current.current.routine[current.current.index];
+    if (item.bpm !== previous.bpm) setProgressExercises(values => {
+      const exercise = values[item.id] ?? exercises.find(e => e.id === item.id);
+      return exercise ? { ...values, [item.id]: { ...exercise, last_practice_bpm: item.bpm, auto_progress_count: 0 } } : values;
+    });
+    rememberBpm(next); commit(item.bpm !== previous.bpm
+      ? { ...next, bpmResets: { ...next.bpmResets, [item.id]: item.bpm } } : next);
   }
   function toggle() {
     if (!current.current || hasInvalidQuickDuration(current.current)) return;
     unlockAudio();
     lastTick.current = performance.now();
     const next = togglePractice(current.current);
-    rememberBpm(next); commit(next);
+    if (next.phase === "countIn" || next.phase === "paused") rememberBpm(next);
+    commit(next);
     void flush();
   }
   function continuePractice() {
@@ -313,8 +340,25 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
   const invalidDuration = hasInvalidQuickDuration(state);
   const isQuick = state ? !!state.quickPractice : quickPractice;
   const exercise = state?.routine[state.index];
+  const progressExercise = exercise ? progressExercises[exercise.id] ?? exercises.find(item => item.id === exercise.id) : undefined;
+  async function toggleAutoProgress() {
+    if (!exercise || !progressExercise || progressSaving) return;
+    setProgressSaving(true); setProgressError("");
+    try {
+      const { data, error } = await supabase.from("exercises")
+        .update({ auto_progress_enabled: !progressExercise.auto_progress_enabled })
+        .eq("id", exercise.id).eq("user_id", userId.current).select("*");
+      if (error || data?.length !== 1) throw new Error(error?.message ?? "Exercise update denied");
+      if (!active.current) return;
+      setProgressExercises(values => ({ ...values, [exercise.id]: data[0] as Exercise }));
+      await savedCallback.current();
+    } catch (error) { setProgressError(`Auto Progression was not saved: ${error instanceof Error ? error.message : "Connection unavailable"}. Try again.`); }
+    finally { setProgressSaving(false); }
+  }
   const grooveUrl = exercises.find(item => item.id === exercise?.id)?.groove_scribe_url;
   const resting = phase === "rest" || phase === "restPaused";
+  const upcomingExercise = resting && !isQuick ? state?.routine[state.index + 1] : undefined;
+  const quickChoices = isQuick ? exercises.filter(item => !item.archived) : [];
   const seconds = Math.ceil((resting ? state?.restMs ?? 0 : state?.remainingMs ?? 0) / 1000);
   const button = "rounded-lg px-5 py-3 font-semibold disabled:opacity-40";
   return (
@@ -323,15 +367,15 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
       {loadError && <div role="alert" className="mt-4 text-amber-600">{loadError}<button onClick={() => setLoadAttempt(value => value + 1)} className="ml-3 underline">Retry loading practice</button></div>}
       {isQuick && !interrupted && (!state || phase === "ready") && <div className="mt-4">
         <label htmlFor="quick-exercise" className="mb-2 block">Exercise</label>
-        <select id="quick-exercise" value={exercise?.id ?? ""} disabled={!loaded}
+        <select id="quick-exercise" value={exercise && !exercises.find(item => item.id === exercise.id)?.archived ? exercise.id : ""} disabled={!loaded}
           onChange={event => {
-            const selected = exercises.find(item => item.id === event.target.value);
+            const selected = quickChoices.find(item => item.id === event.target.value);
             if (selected) commit(createQuickPractice(selected, createClientId(), bpmPending.current[selected.id]));
           }} className="w-full rounded border bg-white p-3 dark:bg-gray-800 dark:text-gray-100">
           <option value="" disabled>Choose an exercise</option>
-          {exercises.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          {quickChoices.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
-        {!exercises.length && <p className="mt-3">Add an exercise on the Exercises page first.</p>}
+        {!quickChoices.length && <p className="mt-3">Add an exercise on the Exercises page first.</p>}
       </div>}
       {invalidDuration && <div role="alert" className="mt-4 rounded border border-amber-500 p-4">
         <p>This saved Quick Practice used fractional minutes, which cannot be recorded. Clear it, then start a new practice of at least 1 whole minute. The invalid session will not add time to Statistics; your Practice BPM will be kept.</p>
@@ -350,8 +394,18 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
         <button onClick={exit} className={`${button} mt-6 bg-gray-600 text-white`}>{isQuick ? "Back to Practice" : "Back to routine"}</button></div> : exercise && state ? <>
         {!isQuick && <p className="mt-4 text-center">Exercise {state.index + 1} of {state.routine.length}</p>}
         <div className="mt-8 text-center">
-          <h3 className="text-3xl font-bold">{exercise.name}</h3>
+          <h3 className="break-words text-3xl font-bold">{upcomingExercise ? `Next: ${upcomingExercise.name}` : exercise.name}</h3>
           <p className="mt-6">Practice BPM</p><p className="text-6xl font-bold text-blue-600">{exercise.bpm}</p>
+          {progressExercise && <div className="mt-4 text-sm">
+            <button type="button" aria-pressed={!!progressExercise.auto_progress_enabled} disabled={progressSaving || interrupted}
+              onClick={() => void toggleAutoProgress()} className="rounded border px-3 py-2 disabled:opacity-40">
+              {progressExercise.auto_progress_enabled ? "Auto Progression On" : "Auto Progression Off"}
+            </button>
+            {progressExercise.auto_progress_enabled && <p className="mt-2">{(progressExercise.last_practice_bpm ?? exercise.bpm) >= exercise.target_bpm
+              ? "Auto Progress: Target reached"
+              : `Auto Progress: ${progressExercise.auto_progress_count ?? 0} of ${progressExercise.auto_progress_after ?? 4} sessions → +${progressExercise.auto_progress_by ?? 2} BPM`}</p>}
+            {progressError && <p role="alert" className="mt-2 text-amber-600">{progressError}</p>}
+          </div>}
           {isQuick && phase === "ready" && <input aria-label="Enter Practice BPM" type="number" min="30" max="300" value={exercise.bpm}
             onChange={event => changeBpm(Number(event.target.value))}
             className="mt-4 w-28 rounded border bg-white p-3 dark:bg-gray-800 dark:text-gray-100" />}

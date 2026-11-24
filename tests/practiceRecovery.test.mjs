@@ -52,12 +52,13 @@ test('successful completion clears recovery; cleanup/pagehide cannot resurrect i
   const rows = new Map(); let lastBpm; let attempts = 0;
   const db = {from(table) {
     if (table === 'drum_sessions') return {async upsert(row) {
+      lastBpm=row.bpm;
       if (!rows.has(row.client_session_id)) rows.set(row.client_session_id,row);
       if (++attempts === 1) return {error:{message:'response lost',code:'network'}};
       return {error:null};
     }};
     assert.equal(table, 'exercises');
-    return {update(value) {lastBpm=value.last_practice_bpm;const q={eq(){return q;},async select(){return {data:[{id:'a',last_practice_bpm:lastBpm}],error:null};}};return q;}};
+    return {select(){const q={eq(){return q;},then(resolve){resolve({data:[{id:'a',last_practice_bpm:lastBpm}],error:null});}};return q;}};
   }};
   await assert.rejects(saveCompletedPractice(db,'user',s.pending[0]), /response lost/);
   assert.ok(parsePractice(disk.getItem(key)).pending.length);

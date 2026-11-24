@@ -14,9 +14,9 @@ function environment() {
   const disk=new Map(), rows=new Map();let offline=false, writes=0, remembered=null, bpmOffline=false;
   const storage={getItem:k=>disk.get(k)??null,setItem:(k,v)=>disk.set(k,v),removeItem:k=>disk.delete(k)};
   const db={auth:{async getSession(){if(offline)throw new TypeError('Failed to fetch');return {data:{session:{user:{id:'user'}}},error:null};}},from(table){
-    if(table==='drum_sessions')return {async upsert(row){assert.ok(Number.isInteger(row.minutes), 'bigint minutes must be integral');if(offline)return {error:{message:'offline'}};writes++;if(!rows.has(row.client_session_id))rows.set(row.client_session_id,row);return {error:null};}};
+    if(table==='drum_sessions')return {async upsert(row){assert.ok(Number.isInteger(row.minutes), 'bigint minutes must be integral');assert.equal(row.practice_completed,true);if(offline)return {error:{message:'offline'}};writes++;if(!rows.has(row.client_session_id)){rows.set(row.client_session_id,row);remembered=row.bpm;}return {error:null};}};
     assert.equal(table,'exercises','Quick recovery must not access routines');
-    return {update(value){const q={eq(){return q;},async select(){if(bpmOffline)return {data:null,error:{message:'offline',code:'network'}};remembered=value.last_practice_bpm;return {data:[{id:'a',...value}],error:null};}};return q;}};
+    return {select(){const q={eq(){return q;},then(resolve){resolve({data:[{...exercise,last_practice_bpm:remembered}],error:null});}};return q;},update(value){const q={eq(){return q;},async select(){if(bpmOffline)return {data:null,error:{message:'offline',code:'network'}};if('last_practice_bpm' in value)remembered=value.last_practice_bpm;return {data:[{...exercise,last_practice_bpm:remembered,...value,auto_progress_count:0}],error:null};}};return q;}};
   }};
   return {storage,rows,db,setOffline:v=>{offline=v;},writes:()=>writes,remembered:()=>remembered,setBpmOffline:v=>{bpmOffline=v;}};
 }
@@ -44,7 +44,7 @@ function mount(env, quickPractice=false) {
   const window={AudioContext,setInterval(fn,ms){timers.set(++timerId,{fn,ms});return timerId;},clearInterval:id=>timers.delete(id),addEventListener:noop,removeEventListener:noop,confirm:()=>true};
   const modules={react,'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},'@/services/supabase':{supabase:env.db},'@/services/practiceIdentity':identity,'@/services/practiceSessions':sessions,'@/utils/practiceRecovery':recovery,'@/utils/practiceState':state,'@/utils/clientId':{createClientId:()=> 'stable-id'},'@/utils/metronome':metronome,'./GrooveNotation':{default:()=>null}};
   const exports={};vm.runInNewContext(source,{exports,require:name=>{assert.ok(modules[name],name);return modules[name];},window,document:{hidden:false,addEventListener:noop,removeEventListener:noop},navigator:{},localStorage:env.storage,performance:{now:()=>now},console});
-  const props={quickPractice,routineId:null,exercises:[exercise],onExit:noop,onSessionSaved:async()=>{refreshes++;},onRecoveryChange:value=>{available=value;}};
+  const props={quickPractice,routineId:env.routineId??null,exercises:env.exercises??[env.exercise??exercise],onExit:noop,onSessionSaved:async()=>{refreshes++;},onRecoveryChange:value=>{available=value;}};
   function render(){cursor=0;effects=[];tree=exports.default(props);for(const fn of effects)fn();}
   render();
   const nodes=()=>{const found=[];function visit(n){if(!n||typeof n!=='object')return;if(Array.isArray(n)){n.forEach(visit);return;}found.push(n);visit(n.props?.children);}visit(tree);return found;};
@@ -145,4 +145,130 @@ for (const quick of [false,true]) test(`real player mute preserves timer, BPM an
   assert.equal(env.rows.size,1);const row=[...env.rows.values()][0];assert.equal(row.bpm,90);assert.equal(row.minutes,1);assert.equal(row.client_session_id,'muted-session');assert.equal(env.remembered(),90);
   if(!quick){assert.equal(snapshot().phase,'rest');assert.equal(snapshot().index,0);const sounds=player.clicks.length;player.tick(1000);await player.settle();assert.equal(snapshot().restMs,14000);assert.equal(player.clicks.length,sounds+1,'rest pulses remain audible');}
   player.unmount();
+});
+
+test('actual player and PostgreSQL: settings persist, progression waits for completion, rest cannot undo it',async()=>{
+  const {progressionDatabase,owner}=await import('./helpers/progressionDatabase.mjs');
+  const db=await progressionDatabase();
+  async function waitFor(player,predicate){
+    const deadline=Date.now()+5000;
+    while(!predicate()){
+      assert.ok(Date.now()<deadline,'player save did not settle');
+      await new Promise(resolve=>setImmediate(resolve));await player.settle();
+    }
+  }
+  try {
+    for(const quick of [false,true]){
+      await db.reset({auto_progress_enabled:true,auto_progress_count:3});
+      const env=environment();env.exercise=await db.exercise();
+      env.db={from:db.client.from.bind(db.client),auth:{async getSession(){return {data:{session:{user:{id:owner}}},error:null};}}};
+      const first={...env.exercise,bpm:100,duration:1,sessionId:db.session().client_session_id};
+      const saved={...(quick?state.createQuickPractice(env.exercise,first.sessionId):state.createPractice([first,{...first,sessionId:db.session().client_session_id}])),phase:'running'};
+      const key=`drum-practice:v1:${owner}`;env.storage.setItem(key,JSON.stringify(saved));
+      const player=mount(env,quick);await player.settle();player.button('Continue practice');await player.settle();
+      player.tick(59000);await player.settle();assert.equal((await db.exercise()).last_practice_bpm,100);
+      assert.equal(JSON.parse(env.storage.getItem(key)).routine[0].bpm,100);
+      player.tick(1000);await waitFor(player,()=>player.refreshes()===1);
+      assert.equal((await db.exercise()).last_practice_bpm,102);assert.equal((await db.exercise()).auto_progress_count,0);
+      if(!quick){
+        let snapshot=JSON.parse(env.storage.getItem(key));assert.equal(snapshot.routine[0].bpm,100);assert.equal(snapshot.routine[1].bpm,102);
+        player.button('Pause Rest');await player.settle();player.button('Resume Rest');await player.settle();
+        assert.equal((await db.exercise()).last_practice_bpm,102);
+        player.tick(15000);await player.settle();snapshot=JSON.parse(env.storage.getItem(key));
+        assert.equal(snapshot.index,1);assert.equal(snapshot.phase,'countIn');assert.equal(snapshot.routine[1].bpm,102);
+      }
+      player.unmount();
+    }
+    await db.reset({auto_progress_enabled:true,auto_progress_count:2});
+    const env=environment();env.exercise=await db.exercise();
+    env.db={from:db.client.from.bind(db.client),auth:{async getSession(){return {data:{session:{user:{id:owner}}},error:null};}}};
+    const saved={...state.createQuickPractice(env.exercise,db.session().client_session_id),phase:'running'};
+    const key=`drum-practice:v1:${owner}`;env.storage.setItem(key,JSON.stringify(saved));
+    const player=mount(env,true);await player.settle();player.button('Continue practice');await player.settle();
+    db.setOnline(false);player.button('Auto Progression On');
+    await waitFor(player,()=>player.nodes().some(n=>n.props?.role==='alert'));
+    db.setOnline(true);
+    assert.equal((await db.exercise()).auto_progress_enabled,true);
+    assert.equal((await db.exercise()).auto_progress_count,2);
+    assert.deepEqual(JSON.parse(env.storage.getItem(key)),saved,'failed setting save preserves practice');
+    player.button('Auto Progression On');await waitFor(player,()=>player.refreshes()===1);
+    assert.equal((await db.exercise()).auto_progress_enabled,false);assert.equal((await db.exercise()).auto_progress_count,0);
+    assert.deepEqual(JSON.parse(env.storage.getItem(key)),saved,'settings switch does not change practice state');
+    player.tick(1000);await player.settle();assert.equal(JSON.parse(env.storage.getItem(key)).remainingMs,59000);
+    player.button('Auto Progression Off');await waitFor(player,()=>player.refreshes()===2);
+    assert.equal((await db.exercise()).auto_progress_enabled,true);assert.equal((await db.exercise()).auto_progress_count,0);
+    player.tick(59000);await waitFor(player,()=>player.refreshes()===3);
+    assert.equal((await db.exercise()).auto_progress_count,1);player.unmount();
+  }finally{await db.pg.close();}
+});
+
+test('an existing routine plays an archived item and previews the actual next exercise during rest', async () => {
+  const env = environment();
+  const archived = {...exercise, archived: true};
+  const next = {...exercise, id: 'b', name: 'Doubles', starting_bpm: 80};
+  env.exercises = [archived, next];
+  env.routineId = 'saved-routine';
+  const originalFrom = env.db.from.bind(env.db);
+  env.db.from = table => {
+    if (table === 'drum_sessions') return originalFrom(table);
+    const query = {
+      eq() { return query; },
+      async maybeSingle() { return {data: {id: env.routineId}, error: null}; },
+      async order() {
+        return {data: [archived, next].map(item => ({exercise_id: item.id, bpm: 60, duration: 1})), error: null};
+      },
+      then(resolve) { resolve({data: env.exercises, error: null}); },
+    };
+    return {select() { return query; }, ...(table === 'exercises' ? {update: originalFrom(table).update} : {})};
+  };
+  const player = mount(env);
+  const heading = () => player.nodes().find(node => node.type === 'h3')?.props.children;
+  try {
+    await player.settle();
+    assert.equal(heading(), 'Singles');
+    player.button('Start'); await player.settle();
+    player.tick(4000); await player.settle();
+    player.tick(60000); await player.settle();
+    assert.equal(heading(), 'Next: Doubles');
+    assert.ok(player.nodes().some(node => node.props?.children === '15s'));
+    player.button('Pause Rest'); await player.settle();
+    player.tick(15000); await player.settle();
+    assert.equal(heading(), 'Next: Doubles');
+    player.button('Resume Rest'); await player.settle();
+    player.tick(15000); await player.settle();
+    assert.equal(heading(), 'Doubles');
+  } finally {
+    player.unmount();
+  }
+});
+
+test('the final exercise still goes directly to routine completion', async () => {
+  const env = environment();
+  const saved = state.createPractice([{...exercise, bpm: 60, duration: 1, sessionId: 'final'}]);
+  env.storage.setItem('drum-practice:v1:user', JSON.stringify({...saved, phase: 'running'}));
+  const player = mount(env);
+  try {
+    await player.settle();
+    player.button('Continue practice'); await player.settle();
+    player.tick(60000); await player.settle();
+    assert.equal(player.nodes().find(node => node.type === 'h3')?.props.children, 'Routine complete');
+    assert.equal(env.rows.size, 1);
+  } finally {
+    player.unmount();
+  }
+});
+
+test('Quick Practice offers active choices and cannot select an archived exercise', async () => {
+  const env = environment();
+  env.exercises = [exercise, {...exercise, id: 'archived', name: 'Doubles', archived: true}];
+  const player = mount(env, true);
+  try {
+    await player.settle();
+    const select = player.nodes().find(node => node.props?.id === 'quick-exercise');
+    assert.deepEqual(player.nodes().filter(node => node.type === 'option').map(node => node.props.value), ['', 'a']);
+    select.props.onChange({target: {value: 'archived'}}); await player.settle();
+    assert.equal(env.storage.getItem('drum-practice:v1:user'), null);
+  } finally {
+    player.unmount();
+  }
 });

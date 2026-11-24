@@ -85,7 +85,7 @@ export default function RoutineBuilder({
   }, [preferredRoutineId]);
 
   const availableExercises = exercises.filter(
-    exercise => !draft.items.some(item => item.exercise_id === exercise.id)
+    exercise => !exercise.archived && !draft.items.some(item => item.exercise_id === exercise.id)
   );
   const savedName = savedRoutines.find(routine => routine.id === draft.id)?.name ?? "";
   const dirty = itemsChanged || draft.name !== savedName;

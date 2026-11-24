@@ -45,9 +45,9 @@ test('completion queues immediately once, has no next exercise/rest, saves one s
   const sessions = new Map(); const writes = []; let remembered;
   const db = { from(table) {
     writes.push(table);
-    if (table === 'drum_sessions') return { async upsert(row) { sessions.set(row.client_session_id, row); return {error:null}; } };
+    if (table === 'drum_sessions') return { async upsert(row) { sessions.set(row.client_session_id, row); remembered={last_practice_bpm:row.bpm};return {error:null}; } };
     assert.equal(table, 'exercises', 'Quick Practice must never access saved routine tables');
-    return { update(value) { remembered = value; const q = {eq() {return q;}, async select() {return {data:[{id:'a', ...value}],error:null};}}; return q; } };
+    return { select() { const q = {eq() {return q;}, then(resolve) {resolve({data:[{id:'a', ...remembered}],error:null});}}; return q; } };
   } };
   await saveCompletedPractice(db, 'user', s.pending[0]);
   await saveCompletedPractice(db, 'user', s.pending[0]); // lost response/recovery retry

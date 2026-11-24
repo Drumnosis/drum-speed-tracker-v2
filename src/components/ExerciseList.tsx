@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { supabase } from "@/services/supabase";
+import { practiceIdentity } from "@/services/practiceIdentity";
 import LogSessionModal from "@/components/LogSessionModal";
 import ExerciseStats from "@/components/ExerciseStats";
 import BpmProgressChart from "@/components/BpmProgressChart";
 import SessionHistory from "@/components/SessionHistory";
 import EditGrooveScribeLink from "@/components/EditGrooveScribeLink";
 import GrooveNotation from "@/components/GrooveNotation";
+import EditAutoProgress from "@/components/EditAutoProgress";
 import { calculateExerciseStats } from "@/utils/exerciseStats";
 import type { Exercise, DrumSession } from "@/types";
 
@@ -16,6 +18,7 @@ type ExerciseListProps = {
   sessions: DrumSession[];
   onExercisesChanged: () => Promise<void>;
   readOnly?: boolean;
+  emptyMessage?: string;
 };
 
 export default function ExerciseList({
@@ -23,11 +26,33 @@ export default function ExerciseList({
   sessions,
   onExercisesChanged,
   readOnly = false,
+  emptyMessage = "No exercises yet.",
 }: ExerciseListProps) {
+  const [archiveChangeId, setArchiveChangeId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [selectedExerciseName, setSelectedExerciseName] = useState("");
+
+  async function changeArchiveStatus(exercise: Exercise) {
+    setArchiveChangeId(exercise.id);
+    const archived = !exercise.archived;
+    try {
+      const user = await practiceIdentity(supabase.auth);
+      const { error } = await supabase.from("exercises")
+        .update({ archived })
+        .eq("id", exercise.id)
+        .eq("user_id", user.id)
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+      await onExercisesChanged();
+    } catch {
+      alert(archived ? "Could not archive exercise. Try again." : "Could not restore exercise. Try again.");
+    } finally {
+      setArchiveChangeId(null);
+    }
+  }
 
 async function deleteExercise(id: string) {
   if (!confirm("Delete this exercise?")) {
@@ -68,7 +93,7 @@ async function deleteExercise(id: string) {
   if (exercises.length === 0) {
     return (
       <p className="mt-6 text-gray-500">
-        No exercises yet.
+        {emptyMessage}
       </p>
     );
   }
@@ -92,20 +117,27 @@ async function deleteExercise(id: string) {
               key={exercise.id}
               className="rounded-lg border bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-lg font-semibold">
                   {exercise.name}
+                  {readOnly && exercise.archived && <span className="ml-2 text-sm font-normal">(Archived)</span>}
                 </h3>
                 <button onClick={() => logSession(exercise.id, exercise.name)}
                   className="rounded bg-blue-600 px-3 py-2 text-white">Log practice</button>
 
                 {!readOnly && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button"
+                      onClick={() => void changeArchiveStatus(exercise)}
+                      disabled={archiveChangeId !== null || deletingId === exercise.id}
+                      className="rounded border px-3 py-2 disabled:opacity-50">
+                      {archiveChangeId === exercise.id ? "Saving…" : exercise.archived ? "Restore" : "Archive"}
+                    </button>
                     
 
                     <button
                       onClick={() => deleteExercise(exercise.id)}
-                      disabled={deletingId === exercise.id}
+                      disabled={deletingId === exercise.id || archiveChangeId === exercise.id}
                       className="rounded bg-red-600 px-3 py-2 text-white"
                     >
                       {deletingId === exercise.id
@@ -154,6 +186,7 @@ async function deleteExercise(id: string) {
                  url={exercise.groove_scribe_url}
                  onSaved={onExercisesChanged}
                />
+               <EditAutoProgress key={`${exercise.id}:${exercise.auto_progress_enabled}:${exercise.auto_progress_after}:${exercise.auto_progress_by}`} exercise={exercise} onSaved={onExercisesChanged} />
              </>
            )}
 
