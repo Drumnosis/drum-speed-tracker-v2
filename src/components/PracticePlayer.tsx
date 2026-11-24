@@ -398,7 +398,7 @@ export default function PracticePlayer({ quickPractice = false, routineId, exerc
           <p className="mt-6">Practice BPM</p><p className="text-6xl font-bold text-blue-600">{exercise.bpm}</p>
           {progressExercise && <div className="mt-4 text-sm">
             <button type="button" aria-pressed={!!progressExercise.auto_progress_enabled} disabled={progressSaving || interrupted}
-              onClick={() => void toggleAutoProgress()} className="rounded border px-3 py-2 disabled:opacity-40">
+              onClick={() => void toggleAutoProgress()} className="rounded border border-blue-200 bg-blue-50 px-3 py-2 font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-40 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-200 dark:hover:bg-blue-900">
               {progressExercise.auto_progress_enabled ? "Auto Progression On" : "Auto Progression Off"}
             </button>
             {progressExercise.auto_progress_enabled && <p className="mt-2">{(progressExercise.last_practice_bpm ?? exercise.bpm) >= exercise.target_bpm

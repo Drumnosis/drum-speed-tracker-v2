@@ -193,7 +193,7 @@ const totalPracticeMinutes = sessions.reduce(
             </h2>
 
             <button type="button" onClick={() => setShowArchived(value => !value)}
-              className="mb-4 rounded border px-4 py-2">
+              className={`mb-4 rounded px-4 py-2 ${showArchived ? "border" : "bg-blue-700 font-semibold text-white hover:bg-blue-800"}`}>
               {showArchived ? "Back to Exercises" : "View Archived Exercises"}
             </button>
             {!showArchived && <AddExerciseForm onExerciseAdded={loadData} />}

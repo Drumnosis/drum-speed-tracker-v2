@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { supabase } from "@/services/supabase";
 import { practiceIdentity } from "@/services/practiceIdentity";
 import LogSessionModal from "@/components/LogSessionModal";
@@ -30,6 +30,8 @@ export default function ExerciseList({
 }: ExerciseListProps) {
   const [archiveChangeId, setArchiveChangeId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const removeDialog = useRef<HTMLDialogElement>(null);
+  const pendingRemovalId = useRef<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [selectedExerciseName, setSelectedExerciseName] = useState("");
@@ -54,11 +56,24 @@ export default function ExerciseList({
     }
   }
 
-async function deleteExercise(id: string) {
-  if (!confirm("Delete this exercise?")) {
-    return;
+  function requestRemoval(id: string) {
+    if (!removeDialog.current) return;
+    pendingRemovalId.current = id;
+    removeDialog.current.showModal();
   }
 
+  function cancelRemoval() {
+    pendingRemovalId.current = null;
+    removeDialog.current?.close();
+  }
+
+  async function confirmRemoval() {
+    const id = pendingRemovalId.current;
+    cancelRemoval();
+    if (id !== null) await deleteExercise(id);
+  }
+
+async function deleteExercise(id: string) {
   setDeletingId(id);
 
   await supabase
@@ -130,19 +145,22 @@ async function deleteExercise(id: string) {
                     <button type="button"
                       onClick={() => void changeArchiveStatus(exercise)}
                       disabled={archiveChangeId !== null || deletingId === exercise.id}
-                      className="rounded border px-3 py-2 disabled:opacity-50">
+                      className={`rounded border px-3 py-2 disabled:opacity-50 ${exercise.archived
+                        ? ""
+                        : "border-blue-200 bg-blue-50 font-medium text-blue-800 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-200 dark:hover:bg-blue-900"}`}>
                       {archiveChangeId === exercise.id ? "Saving…" : exercise.archived ? "Restore" : "Archive"}
                     </button>
                     
 
                     <button
-                      onClick={() => deleteExercise(exercise.id)}
+                      type="button"
+                      onClick={() => requestRemoval(exercise.id)}
                       disabled={deletingId === exercise.id || archiveChangeId === exercise.id}
-                      className="rounded bg-red-600 px-3 py-2 text-white"
+                      className="rounded bg-red-700 px-3 py-2 font-medium text-white hover:bg-red-800 disabled:opacity-50"
                     >
                       {deletingId === exercise.id
                         ? "Deleting..."
-                        : "Delete"}
+                        : "Remove Exercise"}
                     </button>
                   </div>
                 )}
@@ -216,6 +234,23 @@ async function deleteExercise(id: string) {
           );
         })}
       </div>
+
+      <dialog ref={removeDialog} aria-labelledby="remove-exercise-title" aria-describedby="remove-exercise-description"
+        onCancel={() => { pendingRemovalId.current = null; }}
+        className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-xl bg-white p-6 text-gray-900 shadow-xl backdrop:bg-black/60 dark:bg-gray-900 dark:text-gray-100">
+        <h2 id="remove-exercise-title" className="text-lg font-semibold">
+          Are you sure you want to remove this exercise?
+        </h2>
+        <p id="remove-exercise-description" className="mt-2 text-sm">
+          This permanently deletes the exercise and its practice history and removes it from saved routines.
+        </p>
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button type="button" onClick={cancelRemoval}
+            className="rounded border px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-800">Cancel</button>
+          <button type="button" onClick={confirmRemoval}
+            className="rounded bg-red-700 px-4 py-2 font-medium text-white hover:bg-red-800">Remove</button>
+        </div>
+      </dialog>
 
       <LogSessionModal
         key={`${selectedExerciseId}:${modalOpen}`}

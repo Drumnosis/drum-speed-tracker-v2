@@ -243,7 +243,7 @@ export default function RoutineBuilder({
             ))}
           </select>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => void chooseRoutine("")} className="rounded-lg border px-4 py-3">
+            <button type="button" onClick={() => void chooseRoutine("")} className="rounded-lg bg-blue-700 px-4 py-3 font-semibold text-white hover:bg-blue-800">
               New Routine
             </button>
             {draft.id && (

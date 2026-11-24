@@ -126,3 +126,63 @@ test('archive and restore only change visibility while keeping history, Statisti
     await pg.close();
   }
 });
+
+test('Remove Exercise waits for explicit confirmation and Cancel leaves exercise data alone', async () => {
+  const exercise = {id: exerciseId, name: 'Singles', target_bpm: 120, lifetime_goal_minutes: 60};
+  const calls = [];
+  let refreshes = 0;
+  const nodes = renderComponent('ExerciseList', {
+    exercises: [exercise],
+    sessions: [],
+    async onExercisesChanged() { refreshes++; },
+  }, {
+    '@/utils/exerciseStats': {calculateExerciseStats},
+    '@/services/supabase': {supabase: {
+      from(table) {
+        return {delete() {
+          return {async eq(column, value) {
+            calls.push({table, column, value});
+            return {error: null};
+          }};
+        }};
+      },
+    }},
+  });
+  const dialog = nodes.find(node => node.type === 'dialog');
+  const button = label => {
+    const node = nodes.find(node => node.type === 'button' && node.props.children === label);
+    assert.ok(node, `Missing ${label} button`);
+    return node.props.onClick;
+  };
+  const modal = {
+    open: false,
+    showModal() { this.open = true; },
+    close() { this.open = false; },
+  };
+  dialog.props.ref.current = modal;
+  assert.ok(nodes.some(node => node.props.children === 'Are you sure you want to remove this exercise?'));
+
+  button('Remove Exercise')();
+  assert.equal(modal.open, true);
+  assert.deepEqual(calls, []);
+  button('Cancel')();
+  assert.equal(modal.open, false);
+  assert.deepEqual(calls, []);
+  assert.equal(refreshes, 0);
+
+  button('Remove Exercise')();
+  dialog.props.onCancel();
+  modal.close();
+  await button('Remove')();
+  assert.deepEqual(calls, [], 'native dialog dismissal clears the pending removal');
+
+  button('Remove Exercise')();
+  await button('Remove')();
+  assert.equal(modal.open, false);
+  assert.deepEqual(calls, [
+    {table: 'practice_routine_items', column: 'exercise_id', value: exerciseId},
+    {table: 'drum_sessions', column: 'exercise_id', value: exerciseId},
+    {table: 'exercises', column: 'id', value: exerciseId},
+  ]);
+  assert.equal(refreshes, 1);
+});
